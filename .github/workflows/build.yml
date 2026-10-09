@@ -24,3 +24,10 @@ jobs:
 
       - name: Build with Maven
         run: mvn --batch-mode --no-transfer-progress package
+        
+      - name: Save application JAR
+        uses: actions/upload-artifact@v7
+        with:
+          name: appointment-manager
+          path: target/appointment-manager-0.0.1-SNAPSHOT.jar
+          if-no-files-found: error
