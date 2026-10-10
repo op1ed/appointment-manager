@@ -2,13 +2,11 @@ package com.op1ed.appointmentmanager.appointment;
 
 import java.time.OffsetDateTime;
 
-public record AppointmentResponse(
+public record SlotResponse(
         Long id,
-        Long slotId,
-        String customerName,
-        String doctorName,
+        Long doctorId,
         OffsetDateTime startTime,
         OffsetDateTime endTime,
-        AppointmentStatus status
+        boolean available
 ) {
 }

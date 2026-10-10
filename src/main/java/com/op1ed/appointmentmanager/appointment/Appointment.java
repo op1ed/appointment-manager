@@ -22,6 +22,9 @@ public class Appointment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "slot_id")
+    private Long slotId;
+
     @Column(name = "customer_name", nullable = false, length = 100)
     private String customerName;
 
@@ -30,6 +33,9 @@ public class Appointment {
 
     @Column(name = "start_time", nullable = false)
     private Instant startTime;
+
+    @Column(name = "end_time")
+    private Instant endTime;
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.VARCHAR)
@@ -41,12 +47,16 @@ public class Appointment {
 
     public Appointment(
             String customerName,
+            Long slotId,
             String doctorName,
-            Instant startTime
+            Instant startTime,
+            Instant endTime
     ) {
         this.customerName = customerName;
+        this.slotId = slotId;
         this.doctorName = doctorName;
         this.startTime = startTime;
+        this.endTime = endTime;
     }
 
     public void cancel() {
@@ -55,6 +65,10 @@ public class Appointment {
 
     public Long getId() {
         return id;
+    }
+
+    public Long getSlotId() {
+        return slotId;
     }
 
     public String getCustomerName() {
@@ -67,6 +81,10 @@ public class Appointment {
 
     public Instant getStartTime() {
         return startTime;
+    }
+
+    public Instant getEndTime() {
+        return endTime;
     }
 
     public AppointmentStatus getStatus() {
