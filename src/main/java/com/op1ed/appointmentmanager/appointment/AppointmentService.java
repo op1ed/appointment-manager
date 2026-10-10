@@ -49,12 +49,22 @@ public class AppointmentService {
                 .map(this::toResponse);
     }
 
-    private AppointmentResponse toResponse(Appointment appointment) {
-        return new AppointmentResponse(
-                appointment.getId(),
-                appointment.getCustomerName(),
-                appointment.getDoctorName(),
-                appointment.getStartTime().atOffset(ZoneOffset.UTC)
-        );
+    @Transactional
+    public Optional<AppointmentResponse> cancel(long id) {
+        return appointmentRepository.findById(id)
+                .map(appointment -> {
+                    appointment.cancel();
+                    return toResponse(appointment);
+                });
     }
+
+    private AppointmentResponse toResponse(Appointment appointment) {
+    return new AppointmentResponse(
+            appointment.getId(),
+            appointment.getCustomerName(),
+            appointment.getDoctorName(),
+            appointment.getStartTime().atOffset(ZoneOffset.UTC),
+            appointment.getStatus()
+    );
+}
 }

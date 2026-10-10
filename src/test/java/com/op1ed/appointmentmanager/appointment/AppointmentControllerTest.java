@@ -52,6 +52,7 @@ class AppointmentControllerTest {
         assertThat(created.id()).isPositive();
         assertThat(created.customerName()).isEqualTo("张三");
         assertThat(created.doctorName()).isEqualTo("王医生");
+        assertThat(created.status()).isEqualTo(AppointmentStatus.BOOKED);
         assertThat(created.startTime().toInstant())
                 .isEqualTo(request.startTime().toInstant());
 
@@ -62,6 +63,14 @@ class AppointmentControllerTest {
         );
 
         assertThat(storedCustomerName).isEqualTo("张三");
+
+        String storedStatus = jdbcTemplate.queryForObject(
+                "SELECT status FROM appointments WHERE id = ?",
+                String.class,
+                created.id()
+        );
+
+        assertThat(storedStatus).isEqualTo("BOOKED");
 
         URI location = createResponse.getHeaders().getLocation();
 
@@ -137,5 +146,121 @@ class AppointmentControllerTest {
 
         assertThat(response.getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void shouldCancelAppointmentAndKeepRecord() {
+        AppointmentResponse created = createAppointmentForCancellation();
+
+        ResponseEntity<AppointmentResponse> cancelResponse =
+                restTemplate.postForEntity(
+                        "/api/appointments/" + created.id() + "/cancel",
+                        null,
+                        AppointmentResponse.class
+                );
+
+        assertThat(cancelResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        AppointmentResponse cancelled = cancelResponse.getBody();
+        assertThat(cancelled).isNotNull();
+        assertThat(cancelled.status()).isEqualTo(AppointmentStatus.CANCELLED);
+        assertThat(cancelled)
+                .usingRecursiveComparison()
+                .ignoringFields("status")
+                .isEqualTo(created);
+
+        ResponseEntity<AppointmentResponse> detailResponse =
+                restTemplate.getForEntity(
+                        "/api/appointments/" + created.id(),
+                        AppointmentResponse.class
+                );
+
+        assertThat(detailResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(detailResponse.getBody()).isEqualTo(cancelled);
+
+        ResponseEntity<AppointmentResponse[]> listResponse =
+                restTemplate.getForEntity(
+                        "/api/appointments",
+                        AppointmentResponse[].class
+                );
+
+        assertThat(listResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(listResponse.getBody()).isNotNull().contains(cancelled);
+
+        String storedStatus = jdbcTemplate.queryForObject(
+                "SELECT status FROM appointments WHERE id = ?",
+                String.class,
+                created.id()
+        );
+
+        assertThat(storedStatus).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void shouldReturnSameAppointmentWhenCancelledAgain() {
+        AppointmentResponse created = createAppointmentForCancellation();
+        String cancelPath = "/api/appointments/" + created.id() + "/cancel";
+
+        ResponseEntity<AppointmentResponse> firstResponse =
+                restTemplate.postForEntity(
+                        cancelPath,
+                        null,
+                        AppointmentResponse.class
+                );
+
+        assertThat(firstResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(firstResponse.getBody()).isNotNull();
+        assertThat(firstResponse.getBody().id()).isEqualTo(created.id());
+        assertThat(firstResponse.getBody().status())
+                .isEqualTo(AppointmentStatus.CANCELLED);
+
+        ResponseEntity<AppointmentResponse> secondResponse =
+                restTemplate.postForEntity(
+                        cancelPath,
+                        null,
+                        AppointmentResponse.class
+                );
+
+        assertThat(secondResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(secondResponse.getBody()).isEqualTo(firstResponse.getBody());
+
+        String storedStatus = jdbcTemplate.queryForObject(
+                "SELECT status FROM appointments WHERE id = ?",
+                String.class,
+                created.id()
+        );
+
+        assertThat(storedStatus).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenCancellingUnknownId() {
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "/api/appointments/" + Long.MAX_VALUE + "/cancel",
+                null,
+                String.class
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    private AppointmentResponse createAppointmentForCancellation() {
+        CreateAppointmentRequest request = new CreateAppointmentRequest(
+                "取消测试用户",
+                "取消测试医生",
+                OffsetDateTime.now().plusDays(1).withNano(0)
+        );
+
+        ResponseEntity<AppointmentResponse> response = restTemplate.postForEntity(
+                "/api/appointments",
+                request,
+                AppointmentResponse.class
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().status()).isEqualTo(AppointmentStatus.BOOKED);
+
+        return response.getBody();
     }
 }

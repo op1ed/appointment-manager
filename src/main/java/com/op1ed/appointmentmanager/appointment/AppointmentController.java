@@ -54,4 +54,15 @@ public class AppointmentController {
                         "预约不存在"
                 ));
     }
+
+    @PostMapping("/{id}/cancel")
+    public AppointmentResponse cancelAppointment(
+            @PathVariable("id") long id
+    ) {
+        return appointmentService.cancel(id)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "预约不存在"
+                ));
+    }
 }

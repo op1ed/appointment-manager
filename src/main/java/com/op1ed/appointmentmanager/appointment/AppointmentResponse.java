@@ -6,6 +6,7 @@ public record AppointmentResponse(
         Long id,
         String customerName,
         String doctorName,
-        OffsetDateTime startTime
+        OffsetDateTime startTime,
+        AppointmentStatus status
 ) {
 }

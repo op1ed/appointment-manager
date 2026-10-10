@@ -1,9 +1,9 @@
-"""Create an appointment, restart the Compose app, and verify it survives.
+"""Cancel an appointment, restart the Compose app, and verify it survives.
 
 Run on the Ubuntu server from the project checkout:
     sudo python3 scripts/verify_persistence.py
 
-This test restarts only the app service and leaves a test appointment in MySQL.
+This test restarts only the app service and leaves a cancelled appointment in MySQL.
 """
 
 import json
@@ -90,13 +90,28 @@ def main():
     appointment_id = created.get("id")
     if type(appointment_id) is not int or appointment_id <= 0:
         raise RuntimeError("The create response must contain a positive integer id.")
+    if created.get("status") != "BOOKED":
+        raise RuntimeError("A new appointment must have status BOOKED.")
 
     detail_path = f"/api/appointments/{appointment_id}"
     before_restart = request_json(detail_path)
     if before_restart != created:
         raise RuntimeError("The saved appointment differs from the create response.")
 
-    print(f"Created appointment {appointment_id}. Restarting app...", flush=True)
+    cancelled = request_json(detail_path + "/cancel", method="POST")
+    expected_cancelled = dict(created, status="CANCELLED")
+    if cancelled != expected_cancelled:
+        raise RuntimeError("Cancellation must change only the appointment status.")
+
+    cancelled_again = request_json(detail_path + "/cancel", method="POST")
+    if cancelled_again != cancelled:
+        raise RuntimeError("Repeated cancellation must return the same appointment.")
+
+    before_restart = request_json(detail_path)
+    if before_restart != cancelled:
+        raise RuntimeError("The cancellation was not saved.")
+
+    print(f"Cancelled appointment {appointment_id}. Restarting app...", flush=True)
     subprocess.run(
         ["docker", "compose", "restart", "app"],
         cwd=PROJECT_DIR,
@@ -109,7 +124,7 @@ def main():
         raise RuntimeError("The appointment changed after restarting the app.")
 
     print(
-        f"PASS: appointment {appointment_id} survived the application restart.",
+        f"PASS: cancelled appointment {appointment_id} survived the application restart.",
         flush=True,
     )
 
