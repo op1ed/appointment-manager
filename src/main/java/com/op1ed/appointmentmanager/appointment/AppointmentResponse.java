@@ -1,11 +1,11 @@
 package com.op1ed.appointmentmanager.appointment;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 public record AppointmentResponse(
         Long id,
         String customerName,
         String doctorName,
-        LocalDateTime startTime
+        OffsetDateTime startTime
 ) {
 }
