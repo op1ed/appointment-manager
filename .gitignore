@@ -24,3 +24,8 @@ hs_err_pid*
 replay_pid*
 
 target/
+
+# Local deployment settings
+.env
+.env.*
+!.env.example
