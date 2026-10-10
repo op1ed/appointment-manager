@@ -13,6 +13,18 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
+import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentResponse;
+import com.op1ed.appointmentmanager.appointment.web.dto.CreateAppointmentRequest;
+import com.op1ed.appointmentmanager.appointment.web.dto.CreateSlotRequest;
+import com.op1ed.appointmentmanager.appointment.web.dto.SlotResponse;
+import com.op1ed.appointmentmanager.doctor.application.DoctorService;
+import com.op1ed.appointmentmanager.doctor.web.dto.CreateDoctorRequest;
+import com.op1ed.appointmentmanager.doctor.web.dto.DoctorResponse;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -28,6 +40,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.IllegalTransactionStateException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,6 +53,12 @@ class AppointmentControllerTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private DoctorService doctorService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void shouldCreateAndQueryAppointment() {
@@ -341,7 +360,7 @@ class AppointmentControllerTest {
     }
 
     @Test
-    void shouldRejectBookingAlreadyBookedSlot() {
+    void shouldRejectBookingAlreadyBookedSlot() throws Exception {
         SlotResponse slot = createSlot(createDoctor().id());
         AppointmentResponse first = book(slot.id(), "第一位预约人");
         ResponseEntity<String> response = restTemplate.postForEntity(
@@ -351,6 +370,9 @@ class AppointmentControllerTest {
         );
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        JsonNode problem = objectMapper.readTree(response.getBody());
+        assertThat(problem.path("status").asInt()).isEqualTo(409);
+        assertThat(problem.path("code").asText()).isEqualTo("CONFLICT");
         assertThat(countActiveAppointments(slot.id())).isEqualTo(1L);
         assertStoredStatus(first.id(), "BOOKED");
     }
@@ -393,42 +415,40 @@ class AppointmentControllerTest {
     @Test
     void shouldAllowOnlyOneConcurrentBookingPerSlot() throws Exception {
         SlotResponse slot = createSlot(createDoctor().id());
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        List<Future<ResponseEntity<String>>> futures = new ArrayList<>();
+        List<ResponseEntity<String>> responses = sendTwoRequestsTogether(
+                "/api/appointments",
+                new CreateAppointmentRequest("并发预约人一", slot.id()),
+                new CreateAppointmentRequest("并发预约人二", slot.id())
+        );
 
-        try {
-            for (int index = 1; index <= 2; index++) {
-                String customerName = "并发预约人" + index;
-                futures.add(executor.submit(() -> {
-                    ready.countDown();
-                    if (!start.await(10, TimeUnit.SECONDS)) {
-                        throw new IllegalStateException("Booking start signal timed out");
-                    }
-                    return restTemplate.postForEntity(
-                            "/api/appointments",
-                            new CreateAppointmentRequest(customerName, slot.id()),
-                            String.class
-                    );
-                }));
-            }
+        assertThat(responses).extracting(ResponseEntity::getStatusCode)
+                .containsExactlyInAnyOrder(HttpStatus.CREATED, HttpStatus.CONFLICT);
+        assertThat(countActiveAppointments(slot.id())).isEqualTo(1L);
+    }
 
-            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
+    @Test
+    void shouldAllowOnlyOneConcurrentScheduleForDoctor() throws Exception {
+        DoctorResponse doctor = createDoctor();
+        OffsetDateTime startTime = futureTime();
+        CreateSlotRequest request = new CreateSlotRequest(startTime, startTime.plusMinutes(30));
 
-            ResponseEntity<String> first = futures.get(0).get(20, TimeUnit.SECONDS);
-            ResponseEntity<String> second = futures.get(1).get(20, TimeUnit.SECONDS);
-            assertThat(List.of(first.getStatusCode(), second.getStatusCode()))
-                    .containsExactlyInAnyOrder(HttpStatus.CREATED, HttpStatus.CONFLICT);
-            assertThat(countActiveAppointments(slot.id())).isEqualTo(1L);
-        } finally {
-            start.countDown();
-            for (Future<?> future : futures) {
-                future.cancel(true);
-            }
-            executor.shutdownNow();
-        }
+        List<ResponseEntity<String>> responses = sendTwoRequestsTogether(
+                slotsPath(doctor.id()), request, request
+        );
+
+        assertThat(responses).extracting(ResponseEntity::getStatusCode)
+                .containsExactlyInAnyOrder(HttpStatus.CREATED, HttpStatus.CONFLICT);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM appointment_slots WHERE doctor_id = ?",
+                Long.class,
+                doctor.id()
+        )).isEqualTo(1L);
+    }
+
+    @Test
+    void shouldRequireCallerTransactionForDoctorSchedulingLock() {
+        assertThatThrownBy(() -> doctorService.lockForScheduling(Long.MAX_VALUE))
+                .isInstanceOf(IllegalTransactionStateException.class);
     }
 
     @Test
@@ -448,6 +468,42 @@ class AppointmentControllerTest {
 
         assertThat(countActiveAppointments(slot.id())).isEqualTo(1L);
         assertStoredStatus(created.id(), "BOOKED");
+    }
+
+    private List<ResponseEntity<String>> sendTwoRequestsTogether(
+            String path, Object firstRequest, Object secondRequest
+    ) throws Exception {
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        List<Future<ResponseEntity<String>>> futures = new ArrayList<>();
+
+        try {
+            for (Object request : List.of(firstRequest, secondRequest)) {
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Booking start signal timed out");
+                    }
+                    return restTemplate.postForEntity(
+                            path, request, String.class
+                    );
+                }));
+            }
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            ResponseEntity<String> first = futures.get(0).get(20, TimeUnit.SECONDS);
+            ResponseEntity<String> second = futures.get(1).get(20, TimeUnit.SECONDS);
+            return List.of(first, second);
+        } finally {
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.cancel(true);
+            }
+            executor.shutdownNow();
+        }
     }
 
     private DoctorResponse createDoctor() {
