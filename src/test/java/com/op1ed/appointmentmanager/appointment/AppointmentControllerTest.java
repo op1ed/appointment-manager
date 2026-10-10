@@ -2,6 +2,7 @@ package com.op1ed.appointmentmanager.appointment;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,12 +23,17 @@ class AppointmentControllerTest {
     @Autowired
     private TestRestTemplate restTemplate;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     void shouldCreateAndQueryAppointment() {
         CreateAppointmentRequest request = new CreateAppointmentRequest(
                 "张三",
                 "王医生",
-                OffsetDateTime.now().plusDays(1).withNano(0)
+                OffsetDateTime.now(ZoneOffset.ofHours(8))
+                        .plusDays(1)
+                        .withNano(0)
         );
 
         ResponseEntity<AppointmentResponse> createResponse =
@@ -47,6 +54,14 @@ class AppointmentControllerTest {
         assertThat(created.doctorName()).isEqualTo("王医生");
         assertThat(created.startTime().toInstant())
                 .isEqualTo(request.startTime().toInstant());
+
+        String storedCustomerName = jdbcTemplate.queryForObject(
+                "SELECT customer_name FROM appointments WHERE id = ?",
+                String.class,
+                created.id()
+        );
+
+        assertThat(storedCustomerName).isEqualTo("张三");
 
         URI location = createResponse.getHeaders().getLocation();
 

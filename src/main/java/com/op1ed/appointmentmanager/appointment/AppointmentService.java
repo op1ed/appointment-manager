@@ -1,43 +1,60 @@
 package com.op1ed.appointmentmanager.appointment;
 
-import java.util.Comparator;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@Transactional(readOnly = true)
 public class AppointmentService {
 
-    private final Map<Long, AppointmentResponse> appointments =
-            new ConcurrentHashMap<>();
+    private final AppointmentRepository appointmentRepository;
 
-    private final AtomicLong nextId = new AtomicLong();
+    public AppointmentService(
+            AppointmentRepository appointmentRepository
+    ) {
+        this.appointmentRepository = appointmentRepository;
+    }
 
+    @Transactional
     public AppointmentResponse create(CreateAppointmentRequest request) {
-        long id = nextId.incrementAndGet();
-
-        AppointmentResponse appointment = new AppointmentResponse(
-                id,
+        Appointment appointment = new Appointment(
                 request.customerName().strip(),
                 request.doctorName().strip(),
                 request.startTime()
+                        .toInstant()
+                        .truncatedTo(ChronoUnit.MICROS)
         );
 
-        appointments.put(id, appointment);
-        return appointment;
+        Appointment saved = appointmentRepository.save(appointment);
+
+        return toResponse(saved);
     }
 
     public List<AppointmentResponse> findAll() {
-        return appointments.values().stream()
-                .sorted(Comparator.comparing(AppointmentResponse::id))
+        return appointmentRepository
+                .findAll(Sort.by(Sort.Direction.ASC, "id"))
+                .stream()
+                .map(this::toResponse)
                 .toList();
     }
 
     public Optional<AppointmentResponse> findById(long id) {
-        return Optional.ofNullable(appointments.get(id));
+        return appointmentRepository.findById(id)
+                .map(this::toResponse);
+    }
+
+    private AppointmentResponse toResponse(Appointment appointment) {
+        return new AppointmentResponse(
+                appointment.getId(),
+                appointment.getCustomerName(),
+                appointment.getDoctorName(),
+                appointment.getStartTime().atOffset(ZoneOffset.UTC)
+        );
     }
 }

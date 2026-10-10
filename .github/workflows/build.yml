@@ -11,6 +11,22 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci_root_password
+          MYSQL_DATABASE: appointment_manager_test
+          MYSQL_USER: appointment_ci
+          MYSQL_PASSWORD: ci_app_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysql --protocol=TCP -h 127.0.0.1 -uappointment_ci -pci_app_password -e 'SELECT 1' appointment_manager_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
     steps:
       - name: Check out code
         uses: actions/checkout@v7
@@ -23,8 +39,12 @@ jobs:
           cache: maven
 
       - name: Build with Maven
+        env:
+          DB_URL: "jdbc:mysql://127.0.0.1:3306/appointment_manager_test?connectionTimeZone=UTC&useSSL=false&allowPublicKeyRetrieval=true"
+          DB_USERNAME: appointment_ci
+          DB_PASSWORD: ci_app_password
         run: mvn --batch-mode --no-transfer-progress package
-        
+
       - name: Save application JAR
         uses: actions/upload-artifact@v7
         with:
