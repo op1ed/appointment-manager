@@ -53,6 +53,8 @@ com.op1ed.appointmentmanager
 
 应用服务负责资源存在、时段有效和占用情况等业务校验。HTTP 格式校验是入口的便利，业务规则仍要保护未来的 Agent 等调用入口。
 
+分页查询使用 `AppointmentQuery` 表达查询条件。`AppointmentService.search` 把筛选条件交给本模块 Repository，在数据库中分页和统计；再把查询结果转换为 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。HTTP 层不直接暴露 Spring Data 的 `Page`，也不把所有预约先加载到内存后分页。
+
 ### 当前分层的取舍
 
 这是轻量分层：
@@ -150,17 +152,40 @@ V3 以前的练习记录仍保留。它们的 `slot_id`、`end_time` 为空，�
 
 统一异常处理将错误映射为 400、404 或 409，并返回 ProblemDetail。HTTP 校验或无法读取请求 JSON，也由 HTTP 层给出统一错误响应。
 
-成功接口的路径和 JSON 保持原样，错误响应则明确提供错误类型。以后 Agent 工具可以依据同一个业务错误判断如何回复、是否重新查询时段，而无需处理 HTTP 特有异常。
+创建、详情、取消等接口继续使用原有预约对象。预约列表接口现已升级为分页对象，结构为 `content`、`page`、`size`、`totalElements`、`totalPages`、`hasNext`，调用方需要从 `content` 读取记录。错误响应明确提供错误类型。以后 Agent 工具可以依据同一个业务错误判断如何回复、是否重新查询时段，而无需处理 HTTP 特有异常。
+
+## 分页查询如何分工
+
+```text
+GET /api/appointments 的查询参数
+    → HTTP Controller：解析数字、状态和带偏移的时间
+    → Query：校验页码、页大小、姓名与时间边界
+    → 应用服务：组织筛选、固定排序与数据库分页
+    → Repository：执行筛选查询和总数统计
+    → 分页 Result：业务记录与分页信息
+    → 分页 Response：转换 content 中的预约并输出 JSON
+```
+
+规则放在 Query 与应用层，未来的 Agent 查询同样需要满足它们：
+
+- HTTP 接口的页码默认 0，页大小默认 20。Query 校验页码非负、页大小为 1～100，且 `page * size` 不超过 `Integer.MAX_VALUE`；其他入口需显式传入页码和页大小。
+- 固定按 `id ASC` 排序，避免数据库没有指定顺序时返回不稳定的页内容。
+- 状态可以限制为 `BOOKED` 或 `CANCELLED`。
+- 提供预约人姓名时，去掉首尾空格后不能为空、不能超过 100 个字符；使用 SQL 等值匹配，匹配行为遵循 MySQL 的 collation，不是模糊搜索。
+- `from`、`to` 转为 UTC `Instant`，归一化到微秒精度，限定预约 `startTime` 的半开区间 `[from, to)`。
+- 可只提供一个时间边界；同时提供时，归一化后的 `to` 必须晚于 `from`。查询可以使用历史时间。
+
+应用服务计算 `hasNext`，分页 Result 保留它以及总记录数、总页数等分页信息，Response 负责输出这些字段。只有当前页的预约记录需要转换为业务结果和响应对象。
 
 ## 建议的阅读顺序
 
-1. 从预约 Controller 看输入输出，再看 `BookAppointmentCommand` 和 `AppointmentResult`，理解入口与业务的交接。
+1. 从预约 Controller 看输入输出，再看 `BookAppointmentCommand` 和 `AppointmentResult`，理解入口与业务的交接；对照列表接口的 [AppointmentQuery](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentQuery.java)、[AppointmentPageResult](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentPageResult.java) 与 [AppointmentPageResponse](../src/main/java/com/op1ed/appointmentmanager/appointment/web/dto/AppointmentPageResponse.java)，区分创建输入与查询输入。
 2. 阅读 [预约应用服务](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java) 的创建方法，沿着事务、行锁、占用查询、保存的顺序画出流程。
 3. 阅读 `Appointment`、`AppointmentSlot`、`AppointmentStatus`，区分对象自身行为与跨对象协调。
-4. 阅读本模块 Repository 与 V3 迁移，理解代码检查和数据库约束各自保证什么。
+4. 阅读本模块 Repository 与 V3 迁移，理解代码检查和数据库约束各自保证什么；再沿着列表查询阅读筛选条件如何组合、分页如何交给数据库执行。
 5. 阅读 [医生应用服务](../src/main/java/com/op1ed/appointmentmanager/doctor/application/DoctorService.java)，重点看普通读取与 `lockForScheduling` 的区别。
 6. 阅读排班创建和取消逻辑，检查锁在什么时候获取、在什么时候释放。
 7. 阅读 [统一异常处理](../src/main/java/com/op1ed/appointmentmanager/shared/web/GlobalExceptionHandler.java)，跟踪一个业务冲突如何变成 HTTP 响应。
 8. 最后阅读集成测试与架构测试，理解它们分别检查行为和依赖边界。
 
-先能解释一个完整流程，再扩展分页、用户身份和 Agent 工具。目录结构的价值是帮助维护这些规则，而不是让项目拥有更多文件夹。
+先能解释创建、取消与分页查询的完整流程，再扩展用户身份和 Agent 工具。目录结构的价值是帮助维护这些规则，而不是让项目拥有更多文件夹。

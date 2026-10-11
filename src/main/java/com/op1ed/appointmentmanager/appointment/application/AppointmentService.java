@@ -1,7 +1,6 @@
 package com.op1ed.appointmentmanager.appointment.application;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
@@ -14,6 +13,8 @@ import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -79,12 +80,28 @@ public class AppointmentService {
         return toResult(saved);
     }
 
-    public List<AppointmentResult> findAll() {
-        return appointmentRepository
-                .findAll(Sort.by(Sort.Direction.ASC, "id"))
-                .stream()
-                .map(this::toResult)
-                .toList();
+    public AppointmentPageResult search(AppointmentQuery query) {
+        PageRequest pageable = PageRequest.of(
+                query.page(), query.size(), Sort.by(Sort.Direction.ASC, "id")
+        );
+        Page<AppointmentResult> page = appointmentRepository.search(
+                query.status(),
+                query.customerName(),
+                query.fromTime(),
+                query.toTime(),
+                pageable
+        ).map(this::toResult);
+
+        // 用 long 计算页号加一，避免极大页号发生整数溢出。
+        boolean hasNext = (long) page.getNumber() + 1 < page.getTotalPages();
+        return new AppointmentPageResult(
+                page.getContent(),
+                page.getNumber(),
+                page.getSize(),
+                page.getTotalElements(),
+                page.getTotalPages(),
+                hasNext
+        );
     }
 
     public Optional<AppointmentResult> findById(long id) {

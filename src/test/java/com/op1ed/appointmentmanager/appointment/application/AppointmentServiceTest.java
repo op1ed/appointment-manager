@@ -1,6 +1,8 @@
 package com.op1ed.appointmentmanager.appointment.application;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -26,11 +28,16 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -167,6 +174,65 @@ class AppointmentServiceTest {
         verifyNoInteractions(appointmentRepository);
     }
 
+    @ParameterizedTest
+    @MethodSource("invalidSearchInputs")
+    void shouldRejectInvalidSearchBeforeAnyDatabaseAccess(
+            int page, int size, String customerName, Instant fromTime, Instant toTime
+    ) {
+        assertThatThrownBy(() -> appointmentService.search(new AppointmentQuery(
+                page, size, null, customerName, fromTime, toTime
+        ))).isInstanceOfSatisfying(BusinessException.class, exception ->
+                assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
+        );
+
+        verifyNoInteractions(appointmentRepository, slotRepository, doctorService);
+    }
+
+    @Test
+    void shouldSearchWithNormalizedFiltersIdSortingAndPreservePageMetadataAndLegacyNullEndTime() {
+        Instant fromTime = Instant.parse("2000-01-01T10:00:00.123456789Z");
+        Instant toTime = fromTime.plusSeconds(7200);
+        AppointmentQuery query = new AppointmentQuery(
+                1, 2, AppointmentStatus.BOOKED, "  张三  ", fromTime, toTime
+        );
+        Appointment legacy = new Appointment(
+                "张三", null, "历史医生", fromTime.plusSeconds(600), null
+        );
+        Appointment current = new Appointment(
+                "张三", 11L, "王医生", fromTime.plusSeconds(1200), fromTime.plusSeconds(3000)
+        );
+        ReflectionTestUtils.setField(legacy, "id", 21L);
+        ReflectionTestUtils.setField(current, "id", 22L);
+        PageRequest repositoryPage = PageRequest.of(1, 2, Sort.by(Sort.Direction.ASC, "id"));
+        when(appointmentRepository.search(
+                eq(AppointmentStatus.BOOKED), eq("张三"),
+                eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
+                eq(toTime.truncatedTo(ChronoUnit.MICROS)), any(Pageable.class)
+        )).thenReturn(new PageImpl<>(List.of(legacy, current), repositoryPage, 5L));
+
+        AppointmentPageResult result = appointmentService.search(query);
+
+        ArgumentCaptor<Pageable> paging = ArgumentCaptor.forClass(Pageable.class);
+        verify(appointmentRepository).search(
+                eq(AppointmentStatus.BOOKED), eq("张三"),
+                eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
+                eq(toTime.truncatedTo(ChronoUnit.MICROS)), paging.capture()
+        );
+        assertThat(paging.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(paging.getValue().getPageSize()).isEqualTo(2);
+        assertThat(paging.getValue().getSort()).isEqualTo(Sort.by(Sort.Direction.ASC, "id"));
+        verifyNoInteractions(slotRepository, doctorService);
+
+        assertThat(result.content()).extracting(AppointmentResult::id).containsExactly(21L, 22L);
+        assertThat(result.content().get(0).slotId()).isNull();
+        assertThat(result.content().get(0).endTime()).isNull();
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.size()).isEqualTo(2);
+        assertThat(result.totalElements()).isEqualTo(5L);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThat(result.hasNext()).isTrue();
+    }
+
     private AppointmentSlot futureSlot() {
         Instant startTime = Instant.now().plusSeconds(3600);
         AppointmentSlot slot = new AppointmentSlot(7L, startTime, startTime.plusSeconds(1800));
@@ -182,6 +248,21 @@ class AppointmentServiceTest {
                 Arguments.of("张三", null),
                 Arguments.of("张三", 0L),
                 Arguments.of("张三", -1L)
+        );
+    }
+
+    private static Stream<Arguments> invalidSearchInputs() {
+        Instant start = Instant.parse("2030-01-01T10:00:00Z");
+        return Stream.of(
+                Arguments.of(-1, 20, null, null, null),
+                Arguments.of(0, 0, null, null, null),
+                Arguments.of(0, 101, null, null, null),
+                Arguments.of(Integer.MAX_VALUE, 100, null, null, null),
+                Arguments.of(0, 20, "   ", null, null),
+                Arguments.of(0, 20, "名".repeat(101), null, null),
+                Arguments.of(0, 20, null, start, start.minusSeconds(1)),
+                Arguments.of(0, 20, null, start, start),
+                Arguments.of(0, 20, null, start.plusNanos(100), start.plusNanos(200))
         );
     }
 }

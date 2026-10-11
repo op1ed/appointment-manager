@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
+import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentPageResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.CreateAppointmentRequest;
 import com.op1ed.appointmentmanager.appointment.web.dto.CreateSlotRequest;
@@ -64,10 +65,11 @@ class AppointmentControllerTest {
     void shouldCreateAndQueryAppointment() {
         DoctorResponse doctor = createDoctor();
         SlotResponse slot = createSlot(doctor.id());
+        String customerName = "张三-" + UUID.randomUUID();
 
         ResponseEntity<AppointmentResponse> createResponse = restTemplate.postForEntity(
                 "/api/appointments",
-                new CreateAppointmentRequest("张三", slot.id()),
+                new CreateAppointmentRequest(customerName, slot.id()),
                 AppointmentResponse.class
         );
 
@@ -76,7 +78,7 @@ class AppointmentControllerTest {
         assertThat(created).isNotNull();
         assertThat(created.id()).isPositive();
         assertThat(created.slotId()).isEqualTo(slot.id());
-        assertThat(created.customerName()).isEqualTo("张三");
+        assertThat(created.customerName()).isEqualTo(customerName);
         assertThat(created.doctorName()).isEqualTo(doctor.name());
         assertThat(created.status()).isEqualTo(AppointmentStatus.BOOKED);
         assertThat(created.startTime().toInstant()).isEqualTo(slot.startTime().toInstant());
@@ -86,7 +88,7 @@ class AppointmentControllerTest {
                 "SELECT customer_name FROM appointments WHERE id = ?",
                 String.class,
                 created.id()
-        )).isEqualTo("张三");
+        )).isEqualTo(customerName);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT slot_id FROM appointments WHERE id = ?",
                 Long.class,
@@ -102,11 +104,14 @@ class AppointmentControllerTest {
         assertThat(detailResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(detailResponse.getBody()).isEqualTo(created);
 
-        ResponseEntity<AppointmentResponse[]> listResponse = restTemplate.getForEntity(
-                "/api/appointments", AppointmentResponse[].class
+        ResponseEntity<AppointmentPageResponse> listResponse = restTemplate.getForEntity(
+                "/api/appointments?customerName={customerName}",
+                AppointmentPageResponse.class,
+                created.customerName()
         );
         assertThat(listResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(listResponse.getBody()).isNotNull().contains(created);
+        assertThat(listResponse.getBody()).isNotNull();
+        assertThat(listResponse.getBody().content()).contains(created);
     }
 
     @Test
@@ -161,11 +166,14 @@ class AppointmentControllerTest {
         assertThat(detailResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(detailResponse.getBody()).isEqualTo(cancelled);
 
-        ResponseEntity<AppointmentResponse[]> listResponse = restTemplate.getForEntity(
-                "/api/appointments", AppointmentResponse[].class
+        ResponseEntity<AppointmentPageResponse> listResponse = restTemplate.getForEntity(
+                "/api/appointments?customerName={customerName}",
+                AppointmentPageResponse.class,
+                created.customerName()
         );
         assertThat(listResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(listResponse.getBody()).isNotNull().contains(cancelled);
+        assertThat(listResponse.getBody()).isNotNull();
+        assertThat(listResponse.getBody().content()).contains(cancelled);
         assertStoredStatus(created.id(), "CANCELLED");
         assertThat(countActiveAppointments(created.slotId())).isZero();
     }
@@ -575,7 +583,7 @@ class AppointmentControllerTest {
 
     private AppointmentResponse createAppointmentForCancellation() {
         SlotResponse slot = createSlot(createDoctor().id());
-        return book(slot.id(), "取消测试用户");
+        return book(slot.id(), "取消测试用户-" + UUID.randomUUID());
     }
 
     private AppointmentResponse cancelAppointment(Long id) {

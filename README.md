@@ -10,7 +10,7 @@
 - 为医生发布未来的预约时段；拒绝时间重叠，允许首尾相接。
 - 查询医生的时段及当前可用状态。
 - 使用 `customerName + slotId` 创建预约；医生姓名和时间由服务器查询。
-- 查询预约列表和详情。
+- 分页查询预约，按状态、预约人姓名和开始时间筛选；查询预约详情。
 - 取消预约并保留记录；重复取消同一预约返回相同结果。
 - 取消后允许重新预约；再次取消旧预约不会释放新预约。
 - 事务中的行锁协调并发请求，数据库唯一索引限制同一时段只有一条有效预约。
@@ -43,7 +43,7 @@ CI 与部署是两步：当前工作流不会自动更新服务器。Docker 镜�
 | POST | `/api/doctors/{doctorId}/slots` | 发布预约时段 | 201 |
 | GET | `/api/doctors/{doctorId}/slots` | 查询时段及可用状态 | 200 |
 | POST | `/api/appointments` | 创建预约 | 201 |
-| GET | `/api/appointments` | 查询预约列表 | 200 |
+| GET | `/api/appointments` | 分页查询与筛选预约 | 200 |
 | GET | `/api/appointments/{id}` | 查询预约详情 | 200 |
 | POST | `/api/appointments/{id}/cancel` | 取消预约 | 200 |
 
@@ -56,7 +56,7 @@ CI 与部署是两步：当前工作流不会自动更新服务器。Docker 镜�
 }
 ```
 
-其中 `slotId` 必须替换为服务器返回的真实时段 ID。成功响应包含 `id`、`slotId`、`customerName`、`doctorName`、`startTime`、`endTime`、`status`。时间按 UTC 返回；请求时间可携带时区偏移。
+其中 `slotId` 必须替换为服务器返回的真实时段 ID。创建、详情和取消接口的预约对象包含 `id`、`slotId`、`customerName`、`doctorName`、`startTime`、`endTime`、`status`。时间按 UTC 返回；请求时间可携带时区偏移。
 
 时段列表的 `available` 是查询当时计算出的结果。创建预约时，应用会在事务内再次检查时段是否开始、是否被占用。
 
@@ -67,6 +67,50 @@ CI 与部署是两步：当前工作流不会自动更新服务器。Docker 镜�
 | 非法输入，包括请求格式校验失败 | 400 | `INVALID_ARGUMENT` |
 | 资源不存在 | 404 | `NOT_FOUND` |
 | 时段重叠或已被占用 | 409 | `CONFLICT` |
+
+### 分页与筛选预约
+
+`GET /api/appointments` 返回分页对象，预约记录放在 `content` 数组中。原来直接读取列表数组的调用方需要改为读取 `content`。没有匹配记录时，响应例如：
+
+```json
+{
+  "content": [],
+  "page": 0,
+  "size": 20,
+  "totalElements": 0,
+  "totalPages": 0,
+  "hasNext": false
+}
+```
+
+`totalElements` 是所有符合筛选条件的记录数，`totalPages` 是对应总页数，`hasNext` 表示是否还有下一页。记录固定按 `id` 升序排列。
+
+| 查询参数 | 默认值 | 规则 |
+| --- | --- | --- |
+| `page` | `0` | 从 0 开始的非负整数 |
+| `size` | `20` | 每页 1～100 条 |
+| `status` | 不限制 | `BOOKED` 或 `CANCELLED` |
+| `customerName` | 不限制 | 提供时去掉首尾空格，不能为空、不能超过 100 个字符；使用 SQL 等值匹配，遵循 MySQL 的 collation，不做模糊查询 |
+| `from` | 不限制下界 | 带偏移的 ISO 时间，预约 `startTime >= from` |
+| `to` | 不限制上界 | 带偏移的 ISO 时间，预约 `startTime < to` |
+
+可组合多个筛选条件。时间范围是 **`[from, to)`**，筛选的是预约开始时间，不是创建记录的时间或整个预约区间是否重叠。输入时间先转换为 UTC `Instant` 并归一化到微秒精度；同时提供上下界时，归一化后的 `to` 必须晚于 `from`。允许查询历史时间范围。
+
+`page * size` 不能超过 Java 的 `Integer.MAX_VALUE`（2,147,483,647）。非法参数返回 400，错误码为 `INVALID_ARGUMENT`。
+
+下面的服务器查询示例会对姓名、时区偏移等参数进行 URL 编码。可以按已有记录修改姓名和范围；日期范围可用于查询历史记录，不要求在未来。
+
+```bash
+curl --get 'http://127.0.0.1:8080/api/appointments' \
+  --data-urlencode 'page=0' \
+  --data-urlencode 'size=10' \
+  --data-urlencode 'status=BOOKED' \
+  --data-urlencode 'customerName=示例用户' \
+  --data-urlencode 'from=2026-10-01T00:00:00+08:00' \
+  --data-urlencode 'to=2026-11-01T00:00:00+08:00'
+```
+
+使用 `--data-urlencode` 可以正确保留时区中的 `+`，避免它被解析为空格。
 
 ### 在服务器尝试完整流程
 
