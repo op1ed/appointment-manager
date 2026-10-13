@@ -15,6 +15,8 @@
 - 按状态、预约人姓名和开始时间筛选，记录与总数都受账号权限限制。
 - 取消预约并保留记录；重复取消同一预约返回相同结果。
 - 取消后允许重新预约；再次取消旧预约不会释放新预约。
+- 将有效的未来预约改到另一个空闲时段，保留预约 ID 与账号归属；失败时保留原预约。
+- 分页查询创建、改期和取消的操作记录；业务变更与记录在同一事务中保存。
 - 事务中的行锁协调并发请求，数据库唯一索引限制同一时段只有一条有效预约。
 
 一个时段接待一位用户。Agent 接入属于后续学习内容，目前没有模型调用功能。
@@ -30,7 +32,7 @@
 | 表结构管理 | Flyway；Hibernate 使用 `ddl-auto=validate` 校验映射 |
 | 持续集成 | GitHub Actions，使用真实 MySQL 执行测试并生成 JAR |
 | 部署 | Docker 多阶段构建、Docker Compose |
-| 部署验证 | Python 3 标准库脚本，验证取消、重新预约和应用重启后的持久化 |
+| 部署验证 | Python 3 标准库脚本，验证取消、重新预约、改期和操作记录的重启持久化 |
 
 当前学习流程是在本地编辑代码，推送到 `main` 后由 GitHub Actions 编译和测试，再在 Ubuntu 服务器更新并部署。该流程不要求本地安装 Java、Maven 或 MySQL。
 
@@ -53,6 +55,8 @@ CI 与部署是两步：当前工作流不会自动更新服务器。Docker 镜�
 | GET | `/api/appointments` | 分页查询与筛选预约 | 本人 / 管理员 | 200 |
 | GET | `/api/appointments/{id}` | 查询预约详情 | 本人 / 管理员 | 200 |
 | POST | `/api/appointments/{id}/cancel` | 取消预约 | 本人 / 管理员 | 200 |
+| POST | `/api/appointments/{id}/reschedule` | 改到目标时段，保留预约 ID | 本人 / 管理员 | 200 |
+| GET | `/api/appointments/{id}/history` | 分页查询操作记录 | 本人 / 管理员 | 200 |
 
 注册请求包含 `username`、`displayName`、`password`；登录请求包含 `username`、`password`。用户名去首尾空格、转换小写，允许 3～50 位英文字母、数字、下划线和连字符。密码至少 8 个字符，UTF-8 编码后最多 72 字节，保留原始空格和大小写。
 
@@ -81,7 +85,26 @@ CI 与部署是两步：当前工作流不会自动更新服务器。Docker 镜�
 | 未登录、令牌无效或过期、登录凭证错误 | 401 | `UNAUTHENTICATED` |
 | 普通用户尝试管理员操作 | 403 | `FORBIDDEN` |
 | 资源不存在 | 404 | `NOT_FOUND` |
-| 时段重叠或已被占用 | 409 | `CONFLICT` |
+| 时段重叠、已被占用或预约当前状态不允许改期 | 409 | `CONFLICT` |
+
+### 预约改期与操作记录
+
+`POST /api/appointments/{id}/reschedule` 使用当前查询到的时段 ID 与目标时段 ID：
+
+```json
+{
+  "expectedSlotId": 12,
+  "targetSlotId": 18
+}
+```
+
+只有尚未开始的 `BOOKED` 预约可以真正改期，目标时段必须存在、尚未开始且空闲，可以属于另一位医生。改期保留预约 ID、预约人姓名与账号归属，更新医生和时段信息；原时段释放、新时段占用在同一事务中完成。目标被占用、输入过期或操作记录保存失败时，原预约不会丢失。已取消的预约以及没有时段的旧练习记录不能改期。
+
+若当前时段已是 `targetSlotId`，返回当前预约且不追加记录；其他情况下，当前时段必须与 `expectedSlotId` 相同，否则返回 409，调用方应重新查询。它是当前时段的比较保护，不是通用的请求幂等键。
+
+`GET /api/appointments/{id}/history?page=0&size=20` 返回与预约列表相同的分页结构。每条记录包含 `id`、`actorId`、`action`、`fromSlotId`、`toSlotId`、UTC `occurredAt`，按记录 ID 升序排列。`action` 为 `BOOKED`、`RESCHEDULED` 或 `CANCELLED`；操作人来自服务端登录身份。重复取消和已经到达目标时段的改期不会产生额外记录。
+
+操作记录从 V5 上线后开始积累，不补造升级前的历史。历史查询同样受预约归属限制，他人的预约与不存在的预约统一返回 404。流程、锁顺序和并发测试见 [改期与操作记录说明](docs/rescheduling-and-history.md)。
 
 ### 分页与筛选预约
 
@@ -179,7 +202,7 @@ print(f"预约详情：{base_url}/api/appointments/{appointment['id']}")
 PY
 ```
 
-完整的取消、重新预约和重启检查使用下面的部署验证脚本。
+完整的取消、重新预约、改期、操作记录和重启检查使用下面的部署验证脚本。
 
 ## 在 Ubuntu 服务器部署
 
@@ -239,7 +262,7 @@ sudo docker compose ps
 
 Compose 将应用绑定到服务器的 `127.0.0.1:8080`，可以在服务器终端访问。数据库数据保存在 `mysql-data` 命名卷中。
 
-本轮增加 V4 迁移，保留旧预约并添加账号、令牌和预约归属。若以后开放公网接口，登录密码与令牌应通过 HTTPS 传输。
+V4 添加账号、令牌与预约归属，V5 添加操作记录表；升级保留旧预约与已有账号，旧记录不会被补造历史。若以后开放公网接口，登录密码与令牌应通过 HTTPS 传输。
 
 查看应用日志：
 
@@ -253,7 +276,7 @@ sudo docker compose logs --tail=100 app
 sudo python3 scripts/verify_persistence.py
 ```
 
-[验证脚本](scripts/verify_persistence.py) 从 Compose 的实际配置中取得管理员凭证并登录，不打印密码和令牌。它创建医生和时段、预约、取消、重新预约，再重启 `app` 服务，检查登录令牌、取消历史与新预约是否仍有效。脚本会保留这些测试记录，只重启应用服务。
+[验证脚本](scripts/verify_persistence.py) 从 Compose 的实际配置中取得管理员凭证并登录，不打印密码和令牌。它创建医生和时段、预约、取消、重新预约、改期并检查操作记录，再重启 `app` 服务，检查登录令牌、取消历史、改期后的预约和操作记录是否保留。脚本会保留这些测试记录，只重启应用服务。
 
 ## 验证代码
 
@@ -266,5 +289,7 @@ mvn --batch-mode --no-transfer-progress package
 工作流提供 MySQL 8.4 测试数据库，以及 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 环境变量。集成测试通过真实 HTTP 与数据库检查预约流程、并发占用和数据库约束；单元测试检查业务输入和模型规则。[ArchUnit 架构测试](src/test/java/com/op1ed/appointmentmanager/architecture/ArchitectureTest.java) 分析编译后的类，检查跨模块依赖与业务层对 HTTP 的依赖边界。ArchUnit 仅作为测试依赖，不参与应用运行。
 
 身份测试覆盖密码散列、重复与并发注册、过期和撤销令牌、管理员操作、同名用户的预约隔离、伪造账号字段及历史记录权限。测试配置单独初始化测试管理员，部署凭证不写入源代码。
+
+改期测试覆盖并发争抢目标时段、不同改期请求、相同请求重试、交叉改期、改期与预约或取消的竞争，以及记录保存失败时的真实事务回滚。权限、域模型和分页规则也有对应验证。
 
 如果自行在其他环境运行 Maven，同样需要 Java 21、Maven、可访问的 MySQL，以及上述三个数据库环境变量。具体测试数量和是否通过，以该次 Maven 输出为准。

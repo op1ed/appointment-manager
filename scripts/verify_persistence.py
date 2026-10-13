@@ -1,4 +1,4 @@
-"""Verify slot booking, cancellation history, and persistence after restart.
+"""Verify booking, cancellation, rescheduling, events, and persistence after restart.
 
 Run on the Ubuntu server from the project checkout:
     sudo python3 scripts/verify_persistence.py
@@ -201,7 +201,37 @@ def main():
         raise RuntimeError("Cancelling the old appointment changed the new booking.")
     check_slot_availability(doctor_id, slot_id, False)
 
-    print(f"Verified cancellation and rebooking of slot {slot_id}. Restarting app...", flush=True)
+    target = request_json(
+        f"/api/doctors/{doctor_id}/slots",
+        method="POST",
+        body={
+            "startTime": (start_time + timedelta(minutes=30)).isoformat(),
+            "endTime": (start_time + timedelta(minutes=60)).isoformat(),
+        },
+        expected_status=201,
+    )
+    target_slot_id = require_positive_id(target, "target slot")
+    reschedule_body = {"expectedSlotId": slot_id, "targetSlotId": target_slot_id}
+    moved = request_json(replacement_path + "/reschedule", method="POST", body=reschedule_body)
+    expected_moved = dict(replacement, slotId=target_slot_id,
+                          startTime=target["startTime"], endTime=target["endTime"])
+    if moved != expected_moved:
+        raise RuntimeError("Rescheduling must keep the appointment ID, customer, doctor, and BOOKED status.")
+    if request_json(replacement_path + "/reschedule", method="POST", body=reschedule_body) != moved:
+        raise RuntimeError("Repeating the same reschedule must return the current appointment.")
+    replacement = moved
+    check_slot_availability(doctor_id, slot_id, True)
+    check_slot_availability(doctor_id, target_slot_id, False)
+    original_history = request_json(detail_path + "/history")
+    moved_history = request_json(replacement_path + "/history")
+    if [event["action"] for event in original_history["content"]] != ["BOOKED", "CANCELLED"]:
+        raise RuntimeError("Cancellation retries must not duplicate operation records.")
+    if [event["action"] for event in moved_history["content"]] != ["BOOKED", "RESCHEDULED"]:
+        raise RuntimeError("Rescheduling retries must not duplicate operation records.")
+    if moved_history["content"][1]["fromSlotId"] != slot_id or moved_history["content"][1]["toSlotId"] != target_slot_id:
+        raise RuntimeError("The reschedule record must identify both slots.")
+
+    print(f"Verified cancellation, rebooking, and rescheduling of appointment {replacement_id}. Restarting app...", flush=True)
     subprocess.run(
         ["docker", "compose", "restart", "app"],
         cwd=PROJECT_DIR,
@@ -216,10 +246,13 @@ def main():
         raise RuntimeError("The appointment changed after restarting the app.")
     if request_json(replacement_path) != replacement:
         raise RuntimeError("The new booking changed after restarting the app.")
-    check_slot_availability(doctor_id, slot_id, False)
+    check_slot_availability(doctor_id, slot_id, True)
+    check_slot_availability(doctor_id, target_slot_id, False)
+    if request_json(detail_path + "/history") != original_history or request_json(replacement_path + "/history") != moved_history:
+        raise RuntimeError("The operation records changed after restarting the app.")
 
     print(
-        f"PASS: slot {slot_id}, cancellation history, and active booking survived restart.",
+        f"PASS: appointment {replacement_id}, login, cancellation, rescheduling, and operation records survived restart.",
         flush=True,
     )
 

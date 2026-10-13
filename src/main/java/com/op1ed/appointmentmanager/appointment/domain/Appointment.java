@@ -2,6 +2,9 @@ package com.op1ed.appointmentmanager.appointment.domain;
 
 import java.time.Instant;
 
+import com.op1ed.appointmentmanager.shared.error.BusinessException;
+import com.op1ed.appointmentmanager.shared.error.ErrorCode;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -76,6 +79,22 @@ public class Appointment {
 
     public void cancel() {
         this.status = AppointmentStatus.CANCELLED;
+    }
+
+    public void rescheduleTo(AppointmentSlot target, String doctorName, Instant now) {
+        if (status != AppointmentStatus.BOOKED || slotId == null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "该预约不能改期");
+        }
+        if (!startTime.isAfter(now)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "预约已经开始，不能改期");
+        }
+        if (!target.isInFutureAt(now)) {
+            throw new BusinessException(ErrorCode.INVALID_ARGUMENT, "目标时段已经开始，不能改期");
+        }
+        this.slotId = target.getId();
+        this.doctorName = doctorName;
+        this.startTime = target.getStartTime();
+        this.endTime = target.getEndTime();
     }
 
     public Long getId() {

@@ -10,6 +10,7 @@ import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentRepository;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentEventRepository;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
@@ -59,12 +60,15 @@ class AppointmentServiceTest {
     @Mock
     private DoctorService doctorService;
 
+    @Mock
+    private AppointmentEventRepository eventRepository;
+
     private AppointmentService appointmentService;
 
     @BeforeEach
     void setUp() {
         appointmentService = new AppointmentService(
-                appointmentRepository, slotRepository, doctorService
+                appointmentRepository, slotRepository, doctorService, eventRepository
         );
     }
 
@@ -271,11 +275,11 @@ class AppointmentServiceTest {
     @Test
     void shouldNotLockSlotOrModifyAppointmentForAnotherOwner() {
         UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
-        when(appointmentRepository.findByIdAndOwnerId(21L, 31L)).thenReturn(Optional.empty());
+        when(appointmentRepository.findVisibleByIdForUpdate(21L, 31L)).thenReturn(Optional.empty());
         assertThat(appointmentService.cancel(user, 21L)).isEmpty();
-        verify(appointmentRepository).findByIdAndOwnerId(21L, 31L);
+        verify(appointmentRepository).findVisibleByIdForUpdate(21L, 31L);
         verify(appointmentRepository, never()).findById(anyLong());
-        verifyNoInteractions(slotRepository, doctorService);
+        verifyNoInteractions(slotRepository, doctorService, eventRepository);
     }
 
     @Test

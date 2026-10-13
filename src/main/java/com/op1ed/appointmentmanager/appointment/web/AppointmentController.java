@@ -4,11 +4,14 @@ import java.net.URI;
 import java.time.OffsetDateTime;
 
 import com.op1ed.appointmentmanager.appointment.application.AppointmentQuery;
+import com.op1ed.appointmentmanager.appointment.application.AppointmentHistoryQuery;
 import com.op1ed.appointmentmanager.appointment.application.AppointmentService;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
 import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentPageResponse;
+import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentHistoryPageResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.CreateAppointmentRequest;
+import com.op1ed.appointmentmanager.appointment.web.dto.RescheduleAppointmentRequest;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
@@ -98,5 +101,28 @@ public class AppointmentController {
                         ErrorCode.NOT_FOUND,
                         "预约不存在"
                 ));
+    }
+
+    @PostMapping("/{id}/reschedule")
+    public AppointmentResponse rescheduleAppointment(
+            @AuthenticationPrincipal UserIdentity caller,
+            @PathVariable("id") long id,
+            @Valid @RequestBody RescheduleAppointmentRequest request
+    ) {
+        return appointmentService.reschedule(caller, id, request.toCommand())
+                .map(AppointmentResponse::from)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "预约不存在"));
+    }
+
+    @GetMapping("/{id}/history")
+    public AppointmentHistoryPageResponse appointmentHistory(
+            @AuthenticationPrincipal UserIdentity caller,
+            @PathVariable("id") long id,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size
+    ) {
+        return appointmentService.history(caller, id, new AppointmentHistoryQuery(page, size))
+                .map(AppointmentHistoryPageResponse::from)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "预约不存在"));
     }
 }
