@@ -27,6 +27,7 @@ class ArchitectureTest {
                 BASE + ".appointment.application..", BASE + ".appointment.domain..",
                 BASE + ".doctor.application..", BASE + ".doctor.domain..",
                 BASE + ".identity.application..", BASE + ".identity.domain..",
+                BASE + ".agent.application..", BASE + ".agent.domain..",
                 BASE + ".shared.error.."
         ).should().dependOnClassesThat().resideInAnyPackage(
                 "org.springframework.http..", "org.springframework.web..", "jakarta.servlet..",
@@ -54,7 +55,7 @@ class ArchitectureTest {
     @Test
     void domainModelsMustNotDependOnOuterLayers() {
         noClasses().that().resideInAnyPackage(
-                BASE + ".appointment.domain..", BASE + ".doctor.domain..", BASE + ".identity.domain.."
+                BASE + ".appointment.domain..", BASE + ".doctor.domain..", BASE + ".identity.domain..", BASE + ".agent.domain.."
         ).should().dependOnClassesThat().resideInAnyPackage(
                 BASE + "..application..", BASE + "..infrastructure..", BASE + "..web.."
         ).check(productionClasses);
@@ -64,7 +65,7 @@ class ArchitectureTest {
     void persistenceMustNotDependOnApplicationOrWebLayers() {
         noClasses().that().resideInAnyPackage(
                 BASE + ".appointment.infrastructure..", BASE + ".doctor.infrastructure..",
-                BASE + ".identity.infrastructure.persistence.."
+                BASE + ".identity.infrastructure.persistence..", BASE + ".agent.infrastructure.persistence.."
         ).should().dependOnClassesThat().resideInAnyPackage(
                 BASE + "..application..", BASE + "..web.."
         ).check(productionClasses);
@@ -73,7 +74,7 @@ class ArchitectureTest {
     @Test
     void webAdaptersMustNotAccessPersistenceDirectly() {
         noClasses().that().resideInAnyPackage(
-                BASE + ".appointment.web..", BASE + ".doctor.web..", BASE + ".identity.web.."
+                BASE + ".appointment.web..", BASE + ".doctor.web..", BASE + ".identity.web..", BASE + ".agent.web.."
         ).should().dependOnClassesThat().resideInAPackage(BASE + "..infrastructure..")
                 .check(productionClasses);
     }
@@ -82,7 +83,7 @@ class ArchitectureTest {
     void sharedCodeMustNotOwnBusinessModuleDependencies() {
         noClasses().that().resideInAPackage(BASE + ".shared..")
                 .should().dependOnClassesThat().resideInAnyPackage(
-                        BASE + ".appointment..", BASE + ".doctor..", BASE + ".identity.."
+                        BASE + ".appointment..", BASE + ".doctor..", BASE + ".identity..", BASE + ".agent.."
                 ).check(productionClasses);
     }
 
@@ -98,6 +99,23 @@ class ArchitectureTest {
     void identityMustNotDependOnAppointmentOrDoctorBusiness() {
         noClasses().that().resideInAPackage(BASE + ".identity..")
                 .should().dependOnClassesThat().resideInAnyPackage(BASE + ".appointment..", BASE + ".doctor..")
+                .check(productionClasses);
+    }
+
+    @Test
+    void agentMustOnlyUseBusinessApplicationEntryPoints() {
+        noClasses().that().resideInAPackage(BASE + ".agent..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        BASE + ".appointment.domain..", BASE + ".appointment.infrastructure..", BASE + ".appointment.web..",
+                        BASE + ".doctor.domain..", BASE + ".doctor.infrastructure..", BASE + ".doctor.web..",
+                        BASE + ".identity.domain..", BASE + ".identity.infrastructure..", BASE + ".identity.web.."
+                ).check(productionClasses);
+    }
+
+    @Test
+    void businessModulesMustNotDependOnAgent() {
+        noClasses().that().resideInAnyPackage(BASE + ".appointment..", BASE + ".doctor..", BASE + ".identity..")
+                .should().dependOnClassesThat().resideInAPackage(BASE + ".agent..")
                 .check(productionClasses);
     }
 }

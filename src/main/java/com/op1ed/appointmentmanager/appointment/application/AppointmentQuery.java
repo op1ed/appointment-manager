@@ -38,6 +38,17 @@ public record AppointmentQuery(
         }
     }
 
+    public static AppointmentQuery withStatusName(int page, int size, String status, String customerName,
+            Instant fromTime, Instant toTime) {
+        AppointmentStatus parsed;
+        try {
+            parsed = status == null ? null : AppointmentStatus.valueOf(status);
+        } catch (IllegalArgumentException exception) {
+            throw invalidArgument("预约状态必须是 BOOKED 或 CANCELLED");
+        }
+        return new AppointmentQuery(page, size, parsed, customerName, fromTime, toTime);
+    }
+
     private static Instant normalizeTime(Instant time) {
         return time == null ? null : time.truncatedTo(ChronoUnit.MICROS);
     }

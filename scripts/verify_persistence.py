@@ -1,4 +1,4 @@
-"""Verify booking, cancellation, rescheduling, events, and persistence after restart.
+"""Verify appointments, events, Agent actions, and persistence after restart.
 
 Run on the Ubuntu server from the project checkout:
     sudo python3 scripts/verify_persistence.py
@@ -100,6 +100,19 @@ def check_slot_availability(doctor_id, slot_id, expected):
     matches = [slot for slot in slots if slot.get("id") == slot_id]
     if len(matches) != 1 or matches[0].get("available") is not expected:
         raise RuntimeError(f"Slot {slot_id} must have available={expected}.")
+
+
+def prepare_agent_booking(slot_id):
+    response = request_json("/api/agent/tools/execute", method="POST", body={
+        "name": "prepare_booking",
+        "arguments": {"customerName": "Agent 部署测试用户", "slotId": slot_id},
+    })
+    action = response.get("result", {})
+    if action.get("status") != "PENDING" or action.get("result") is not None or not action.get("id"):
+        raise RuntimeError("Preparing an Agent booking must return a pending action without a business result.")
+    if action.get("preview", {}).get("after", {}).get("slotId") != slot_id:
+        raise RuntimeError("The Agent preview must identify the selected slot.")
+    return action
 
 
 def main():
@@ -231,6 +244,29 @@ def main():
     if moved_history["content"][1]["fromSlotId"] != slot_id or moved_history["content"][1]["toSlotId"] != target_slot_id:
         raise RuntimeError("The reschedule record must identify both slots.")
 
+    definitions = request_json("/api/agent/tools")
+    if not isinstance(definitions, list) or len(definitions) != 9:
+        raise RuntimeError("The Agent catalog must contain nine tools.")
+    pending_action = prepare_agent_booking(slot_id)
+    pending_path = "/api/agent/actions/" + pending_action["id"]
+    check_slot_availability(doctor_id, slot_id, True)
+    if request_json(replacement_path) != replacement:
+        raise RuntimeError("Preparing an Agent action changed an existing appointment.")
+
+    agent_slot = request_json(f"/api/doctors/{doctor_id}/slots", method="POST", body={
+        "startTime": (start_time + timedelta(minutes=60)).isoformat(),
+        "endTime": (start_time + timedelta(minutes=90)).isoformat(),
+    }, expected_status=201)
+    agent_slot_id = require_positive_id(agent_slot, "Agent slot")
+    confirmed_action = prepare_agent_booking(agent_slot_id)
+    confirmed_path = "/api/agent/actions/" + confirmed_action["id"]
+    confirmed_action = request_json(confirmed_path + "/confirm", method="POST")
+    if confirmed_action.get("status") != "CONFIRMED" or confirmed_action.get("result", {}).get("slotId") != agent_slot_id:
+        raise RuntimeError("Confirming an Agent action must book the selected slot.")
+    agent_appointment_id = require_positive_id(confirmed_action["result"], "Agent appointment")
+    if request_json(confirmed_path + "/confirm", method="POST") != confirmed_action:
+        raise RuntimeError("Agent confirmation retries must return the saved result.")
+
     print(f"Verified cancellation, rebooking, and rescheduling of appointment {replacement_id}. Restarting app...", flush=True)
     subprocess.run(
         ["docker", "compose", "restart", "app"],
@@ -251,8 +287,20 @@ def main():
     if request_json(detail_path + "/history") != original_history or request_json(replacement_path + "/history") != moved_history:
         raise RuntimeError("The operation records changed after restarting the app.")
 
+    if request_json(pending_path) != pending_action:
+        raise RuntimeError("The pending Agent action changed after restarting the app.")
+    if request_json(confirmed_path) != confirmed_action or request_json(confirmed_path + "/confirm", method="POST") != confirmed_action:
+        raise RuntimeError("The confirmed Agent result changed after restarting the app.")
+    if request_json(f"/api/appointments/{agent_appointment_id}/history")["totalElements"] != 1:
+        raise RuntimeError("Agent confirmation retries duplicated operation records.")
+    check_slot_availability(doctor_id, agent_slot_id, False)
+    confirmed_pending = request_json(pending_path + "/confirm", method="POST")
+    if confirmed_pending.get("status") != "CONFIRMED" or confirmed_pending.get("result", {}).get("slotId") != slot_id:
+        raise RuntimeError("The pending Agent action cannot be confirmed after restarting the app.")
+    check_slot_availability(doctor_id, slot_id, False)
+
     print(
-        f"PASS: appointment {replacement_id}, login, cancellation, rescheduling, and operation records survived restart.",
+        f"PASS: appointment {replacement_id}, login, cancellation, rescheduling, events, and Agent actions survived restart.",
         flush=True,
     )
 

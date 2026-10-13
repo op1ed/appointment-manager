@@ -9,9 +9,10 @@
 | `doctor` | 医生资料 | 创建、查询医生；为排班锁定医生记录 |
 | `appointment` | 排班时段、预约、取消、改期、操作记录、占用规则 | 发布时段、查询可用性、创建、取消和改期预约、查询操作记录 |
 | `identity` | 账号、密码校验、登录令牌与身份信息 | 注册、登录、验证令牌、退出、初始化管理员；提供 `UserIdentity` |
+| `agent` | 工具目录、参数校验、动作预览、确认结果 | 调用业务应用服务查询或准备动作；用户确认后执行；保存幂等结果 |
 | `shared` | 各模块共用的错误定义与 HTTP 错误转换 | 业务异常、统一错误响应 |
 
-`shared` 保持小范围，不承载医生或预约业务。以后接入 Agent 时再创建相应模块，由工具调用应用服务；当前没有空的 Agent 模块。
+`shared` 保持小范围，不承载医生或预约业务。`agent` 通过业务应用服务使用医生和预约能力，不直接查询这些模块的表或导入其实体；它只拥有自己的 `agent_actions` 表。当前工具层已经实现，模型适配器将在后续加入。
 
 ### 为什么时段与预约属于同一个模块
 
@@ -44,6 +45,12 @@ com.op1ed.appointmentmanager
 │   └── infrastructure
 │       ├── persistence
 │       └── bootstrap
+├── agent
+│   ├── web
+│   ├── application
+│   ├── domain
+│   └── infrastructure
+│       └── persistence
 └── shared
     ├── error
     └── web
@@ -82,7 +89,11 @@ com.op1ed.appointmentmanager
 ```mermaid
 flowchart TD
     HTTP[预约 HTTP Controller] --> APP[预约应用服务]
-    FUTURE[未来的 Agent 工具] -.-> APP
+    TOOLS[Agent 工具和动作确认] --> APP
+    TOOLS --> DOCTOR
+    TOOLS --> IDENTITY
+    TOOLS --> ACTIONS[Agent 动作 Repository]
+    ACTIONS --> MYSQL
     APP --> DOMAIN[预约与时段模型]
     APP --> REPO[预约模块 Repository]
     APP --> DOCTOR[医生应用服务]
@@ -107,7 +118,7 @@ flowchart TD
 6. 业务代码使用 `shared.error` 中的业务异常，`shared.web` 把错误转换为 HTTP ProblemDetail。
 7. `appointment` 和 `doctor` 只通过 `identity.application` 使用身份能力；身份模块不依赖预约或医生业务。
 8. 管理员初始化位于 `identity.infrastructure.bootstrap`，是调用应用服务的启动适配器；持久化 Repository 仍不依赖应用层。
-9. Agent 工具将来调用应用服务，共用规则、权限与事务，不直接操作 Repository。调用身份由服务端注入，不能由模型生成账号 ID 或管理员标记。
+9. Agent 工具调用业务应用服务，共用规则、权限与事务，不直接操作其他模块的 Repository。调用身份由服务端注入，不能由模型生成账号 ID 或管理员标记。医生、预约和身份模块不依赖 Agent。
 
 架构测试用于检查这些边界，防止后续开发逐渐绕过约定。
 
@@ -166,6 +177,10 @@ V4 之前的预约 `owner_id` 为空，只向管理员开放，普通用户不�
 
 移动包路径时，这些事务与查询顺序都要保留。包结构不会自动保证并发正确性，必须由事务、锁、数据库约束和测试共同验证。
 
+Agent 确认在最外层开启写事务，第一条业务查询锁定当前账号的动作记录。然后直接调用创建、取消或改期应用服务，加入同一事务；预约服务保持原有预约和时段锁顺序。动作确认之前不再重做普通查询，避免 MySQL 的事务快照早于业务锁等待完成。最后保存预约结果快照并刷新动作记录，任何一环失败都回滚业务变更和确认状态。两个请求确认同一个动作时，后者等待动作行锁并返回前者保存的结果。
+
+模型调用将在这个事务之外进行，数据库锁不应跨越外部 API 网络等待。详细的预览与确认边界见 [Agent 工具与动作确认](agent-tools.md)。
+
 ## 错误如何从业务层到 HTTP
 
 业务层使用业务异常表达非法输入、资源不存在或业务冲突，异常带稳定的 `code` 与中文说明。`INVALID_ARGUMENT`、`NOT_FOUND`、`CONFLICT` 分别表达这三类情况。它不抛 `ResponseStatusException`，也不选择 HTTP 状态码。
@@ -210,4 +225,4 @@ GET /api/appointments 的查询参数
 7. 阅读 [统一异常处理](../src/main/java/com/op1ed/appointmentmanager/shared/web/GlobalExceptionHandler.java)，跟踪一个业务冲突如何变成 HTTP 响应。
 8. 最后阅读集成测试与架构测试，理解它们分别检查行为和依赖边界。
 
-继续沿着 [身份与权限说明](identity-and-permissions.md) 阅读登录、请求认证和归属过滤，再扩展 Agent 工具。目录结构的价值是帮助维护这些规则，而不是让项目拥有更多文件夹。
+继续沿着 [身份与权限说明](identity-and-permissions.md) 阅读登录、请求认证和归属过滤，再按 [Agent 工具说明](agent-tools.md) 阅读工具目录、参数校验与确认事务。目录结构的价值是帮助维护这些规则，而不是让项目拥有更多文件夹。

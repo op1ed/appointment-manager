@@ -2,6 +2,7 @@ package com.op1ed.appointmentmanager.appointment.application;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Objects;
 
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentAction;
@@ -15,6 +16,7 @@ import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
+import com.op1ed.appointmentmanager.shared.error.BusinessInputs;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
 import org.springframework.data.domain.Page;
@@ -123,12 +125,29 @@ public class AppointmentService {
 
     @Transactional
     public Optional<AppointmentResult> cancel(UserIdentity caller, long id) {
+        return cancelInternal(UserIdentity.requireAuthenticated(caller), id, false, null);
+    }
+
+    @Transactional
+    public Optional<AppointmentResult> cancelIfUnchanged(UserIdentity caller, long id, Long expectedSlotId) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
+        BusinessInputs.requirePositiveId(id, "预约 ID");
+        if (expectedSlotId != null) {
+            BusinessInputs.requirePositiveId(expectedSlotId, "预览时段 ID");
+        }
+        return cancelInternal(user, id, true, expectedSlotId);
+    }
+
+    private Optional<AppointmentResult> cancelInternal(UserIdentity user, long id,
+            boolean checkExpectedSlot, Long expectedSlotId) {
         // 与改期保持一致：先锁预约，再锁时段；等待后读取最新状态。
         return findVisibleForUpdate(user, id)
                 .map(appointment -> {
                     if (appointment.getStatus() == AppointmentStatus.CANCELLED) {
                         return toResult(appointment);
+                    }
+                    if (checkExpectedSlot && !Objects.equals(appointment.getSlotId(), expectedSlotId)) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "预约时段已改变，请重新生成取消预览");
                     }
                     if (appointment.getSlotId() != null) {
                         lockSlot(appointment.getSlotId());

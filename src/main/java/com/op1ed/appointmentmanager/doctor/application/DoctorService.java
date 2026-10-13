@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +44,15 @@ public class DoctorService {
     public Optional<DoctorInfo> findById(long id) {
         BusinessInputs.requirePositiveId(id, "医生 ID");
         return doctorRepository.findById(id).map(this::toInfo);
+    }
+
+    public DoctorPageResult search(int page, int size, String name) {
+        BusinessInputs.requirePageParameters(page, size);
+        String filter = name == null ? "" : BusinessInputs.requireName(name, "医生姓名");
+        var result = doctorRepository.findByNameContaining(filter,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id"))).map(this::toInfo);
+        return new DoctorPageResult(result.getContent(), result.getNumber(), result.getSize(),
+                result.getTotalElements(), result.getTotalPages(), (long) result.getNumber() + 1 < result.getTotalPages());
     }
 
     public DoctorInfo requireById(long id) {

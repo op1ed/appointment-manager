@@ -44,6 +44,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/appointments", "/api/appointments/**").authenticated()
+                        .requestMatchers("/api/agent/**").authenticated()
                         .anyRequest().denyAll()
                 )
                 .exceptionHandling(exceptions -> exceptions

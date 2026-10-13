@@ -2,6 +2,7 @@ package com.op1ed.appointmentmanager.appointment.application;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -13,9 +14,12 @@ import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.Appoi
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
+import com.op1ed.appointmentmanager.shared.error.BusinessInputs;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -106,6 +110,21 @@ public class SlotService {
                                 && !occupiedSlotIds.contains(slot.getId())
                 ))
                 .toList();
+    }
+
+    public Optional<SlotResult> findById(long id) {
+        BusinessInputs.requirePositiveId(id, "时段 ID");
+        return slotRepository.findById(id).map(slot -> toResult(slot,
+                slot.isInFutureAt(Instant.now()) && !appointmentRepository.existsBySlotIdAndStatus(id, AppointmentStatus.BOOKED)));
+    }
+
+    public SlotPageResult searchAvailable(long doctorId, AvailableSlotQuery query) {
+        doctorService.requireById(doctorId);
+        var page = slotRepository.searchAvailable(doctorId, Instant.now(), query.fromTime(), query.toTime(),
+                PageRequest.of(query.page(), query.size(), Sort.by("startTime", "id")))
+                .map(slot -> toResult(slot, true));
+        return new SlotPageResult(page.getContent(), page.getNumber(), page.getSize(), page.getTotalElements(),
+                page.getTotalPages(), (long) page.getNumber() + 1 < page.getTotalPages());
     }
 
     private SlotResult toResult(

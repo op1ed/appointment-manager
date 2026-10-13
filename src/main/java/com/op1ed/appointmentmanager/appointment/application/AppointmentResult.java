@@ -13,4 +13,7 @@ public record AppointmentResult(
         Instant endTime,
         AppointmentStatus status
 ) {
+    public boolean booked() {
+        return status == AppointmentStatus.BOOKED;
+    }
 }
