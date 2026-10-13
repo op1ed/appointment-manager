@@ -74,6 +74,7 @@ class ReschedulingWorkflowControllerTest extends AgentApiFixtures {
         assertThat(detail(owner.client(), appointment.id()).slotId()).isEqualTo(slots.get(0).id());
         var completed = step(owner.client(), selected, "confirm");
         assertThat(completed.path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(completed.path("selectedSlotId").asLong()).isEqualTo(slots.get(1).id());
         assertThat(completed.path("action").path("status").asText()).isEqualTo("CONFIRMED");
         assertThat(detail(owner.client(), appointment.id()).slotId()).isEqualTo(slots.get(1).id());
         assertThat(history(owner.client(), appointment.id()).totalElements()).isEqualTo(2);
@@ -197,6 +198,20 @@ class ReschedulingWorkflowControllerTest extends AgentApiFixtures {
         db.update("UPDATE agent_actions SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 10 MINUTE), expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE) WHERE id = ?", selected.path("action").path("id").asText());
         assertThat(step(owner.client(), selected, "confirm").path("status").asText()).isEqualTo("WAITING_FOR_SELECTION");
         assertThat(detail(owner.client(), appointment.id()).slotId()).isEqualTo(slots.get(0).id());
+    }
+
+    @Test void shouldRecoverWhenSelectedSlotStartsWhileWaitingForConfirmation() {
+        var slots = createSlots(3); var owner = normalUser(); var appointment = book(owner.client(), slots.get(0).id());
+        var selected = selection(owner.client(), start(owner.client(), appointment.id(), slots.get(0).startTime().toString(), slots.get(2).endTime().toString()), slots.get(1).id());
+        // 模拟时间推进到候选已经开始；预览本身仍在有效期内。
+        db.update("UPDATE appointment_slots SET start_time = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 MINUTE), end_time = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE) WHERE id = ?", slots.get(1).id());
+        var recovered = step(owner.client(), selected, "confirm");
+        assertThat(recovered.path("status").asText()).isEqualTo("WAITING_FOR_SELECTION");
+        assertThat(recovered.path("candidates")).hasSize(1);
+        assertThat(recovered.path("selectedSlotId").isNull()).isTrue();
+        assertThat(owner.client().getForEntity(actionPath(selected.path("action")), JsonNode.class).getBody().path("status").asText()).isEqualTo("REVOKED");
+        assertThat(detail(owner.client(), appointment.id()).slotId()).isEqualTo(slots.get(0).id());
+        assertThat(history(owner.client(), appointment.id()).totalElements()).isEqualTo(1);
     }
 
     @Test void shouldRefreshChangedAppointmentAndAbortCancelledAppointment() {

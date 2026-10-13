@@ -99,7 +99,13 @@ public class ReschedulingWorkflowOperations {
         try {
             actions.confirmForWorkflow(caller, text(state, "workflowId"), text(state, "actionId"));
             return Map.of("status", "COMPLETED", "note", "改期成功");
-        } catch (BusinessException exception) { throwConflict(exception); throw exception; }
+        } catch (BusinessException exception) {
+            // 参数来自已保存的预览；执行节点的 INVALID_ARGUMENT 表示时段在等待期间已开始。
+            if (exception.getCode() == ErrorCode.INVALID_ARGUMENT) {
+                throw new WorkflowBusinessConflict("预览中的时段已失效，已重新查询候选，请重新选择并确认", exception);
+            }
+            throwConflict(exception); throw exception;
+        }
     }
 
     public Map<String, Object> reject(UserIdentity caller, Map<String, Object> state) {

@@ -1,6 +1,7 @@
 package com.op1ed.appointmentmanager.agent.infrastructure.springai;
 
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
@@ -82,8 +83,10 @@ public class SpringAiReschedulingGraph implements ReschedulingGraph {
     @Override public GraphResult resume(UserIdentity caller, String workflowId, String nextNode,
             WorkflowCommands.Signal signal, Long targetSlotId, String note) {
         try {
-            var config = graph.updateState(config(caller, workflowId), Map.of("signal", signal.name(),
-                    "selectedSlotId", targetSlotId == null ? 0L : targetSlotId, "note", note), nextNode);
+            var update = new LinkedHashMap<String, Object>();
+            update.put("signal", signal.name()); update.put("note", note);
+            if (signal == WorkflowCommands.Signal.SELECT) { update.put("selectedSlotId", targetSlotId); }
+            var config = graph.updateState(config(caller, workflowId), update, nextNode);
             // 1.1.2.2 从 checkpoint.nextNode 恢复，继续执行暂停的等待节点，再按 signal 分支。
             graph.invoke((Map<String, Object>) null, config);
             return snapshot(caller, workflowId);

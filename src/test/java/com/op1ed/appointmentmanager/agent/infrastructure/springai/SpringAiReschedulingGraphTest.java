@@ -47,6 +47,7 @@ class SpringAiReschedulingGraphTest {
         verify(operations, never()).execute(any(), anyMap());
         var confirmed = graph.resume(user, id, selected.nextNode(), WorkflowCommands.Signal.CONFIRM, null, "");
         assertThat(confirmed.status()).isEqualTo("COMPLETED");
+        assertThat(WorkflowJson.id(json.state(confirmed.stateJson()), "selectedSlotId")).isEqualTo(20L);
         verify(operations).execute(eq(user), anyMap());
         verify(operations, times(1)).readCurrent(eq(user), anyMap());
     }
