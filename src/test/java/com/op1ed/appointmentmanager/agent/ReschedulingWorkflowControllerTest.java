@@ -2,6 +2,9 @@ package com.op1ed.appointmentmanager.agent;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.op1ed.appointmentmanager.agent.application.AgentActionService;
@@ -161,6 +164,30 @@ class ReschedulingWorkflowControllerTest extends AgentApiFixtures {
         assertThat(reselected.path("action").path("id")).isNotEqualTo(selected.path("action").path("id"));
         assertThat(step(owner.client(), reselected, "confirm").path("status").asText()).isEqualTo("COMPLETED");
         assertThat(history(owner.client(), appointment.id()).totalElements()).isEqualTo(2);
+    }
+
+    @Test void shouldSeeBookingCommittedAfterWorkflowRequestReadButBeforeBusinessLock() throws Exception {
+        var slots = createSlots(3); var owner = normalUser(); var appointment = book(owner.client(), slots.get(0).id());
+        var selected = selection(owner.client(), start(owner.client(), appointment.id(), slots.get(0).startTime().toString(), slots.get(2).endTime().toString()), slots.get(1).id());
+        var entered = new CountDownLatch(1); var proceed = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            entered.countDown();
+            if (!proceed.await(10, TimeUnit.SECONDS)) { throw new IllegalStateException("等待测试并发预约超时"); }
+            return invocation.callRealMethod();
+        }).when(graph).resume(any(), eq(selected.path("id").asText()), anyString(), eq(WorkflowCommands.Signal.CONFIRM), isNull(), anyString());
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var confirmation = executor.submit(() -> owner.client().postForEntity(workflowPath(selected) + "/confirm", stepBody(selected), JsonNode.class));
+            try {
+                assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+                book(restTemplate, slots.get(1).id());
+            } finally { proceed.countDown(); }
+            var recovered = confirmation.get(20, TimeUnit.SECONDS);
+            assertThat(recovered.getStatusCode()).as("%s", recovered.getBody()).isEqualTo(HttpStatus.OK);
+            assertThat(recovered.getBody().path("status").asText()).isEqualTo("WAITING_FOR_SELECTION");
+            assertThat(recovered.getBody().path("candidates")).hasSize(1);
+        } finally { proceed.countDown(); reset(graph); }
+        assertThat(detail(owner.client(), appointment.id()).slotId()).isEqualTo(slots.get(0).id());
+        assertThat(history(owner.client(), appointment.id()).totalElements()).isEqualTo(1);
     }
 
     @Test void shouldRecoverExpiredPreviewWithoutChangingAppointment() {
