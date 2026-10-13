@@ -45,6 +45,8 @@ public class AgentAction {
     private Long expectedSlotId;
     @Column(name = "target_slot_id")
     private Long targetSlotId;
+    @Column(name = "workflow_id", length = 36)
+    private String workflowId;
     @Column(name = "preview_json", nullable = false, columnDefinition = "MEDIUMTEXT")
     private String previewJson;
     @Column(name = "result_json", columnDefinition = "MEDIUMTEXT")
@@ -82,6 +84,20 @@ public class AgentAction {
         return status == AgentActionStatus.PENDING && !expiresAt.isAfter(now);
     }
 
+    public void assignWorkflow(String workflowId) {
+        if (kind != AgentActionKind.RESCHEDULE || status != AgentActionStatus.PENDING) {
+            throw new IllegalStateException("只有待确认的改期预览可以关联流程");
+        }
+        this.workflowId = Objects.requireNonNull(workflowId);
+    }
+
+    public void revoke() {
+        if (status == AgentActionStatus.CONFIRMED) {
+            throw new BusinessException(ErrorCode.CONFLICT, "已确认的动作不能撤回");
+        }
+        this.status = AgentActionStatus.REVOKED;
+    }
+
     public void confirm(String resultJson, Instant now) {
         if (status != AgentActionStatus.PENDING || isExpiredAt(now)) {
             throw new BusinessException(ErrorCode.CONFLICT, "动作已确认或已过期");
@@ -99,6 +115,7 @@ public class AgentAction {
     public String getCustomerName() { return customerName; }
     public Long getExpectedSlotId() { return expectedSlotId; }
     public Long getTargetSlotId() { return targetSlotId; }
+    public String getWorkflowId() { return workflowId; }
     public String getPreviewJson() { return previewJson; }
     public String getResultJson() { return resultJson; }
     public Instant getCreatedAt() { return createdAt; }

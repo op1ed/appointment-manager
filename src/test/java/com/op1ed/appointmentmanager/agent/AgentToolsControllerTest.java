@@ -21,7 +21,7 @@ class AgentToolsControllerTest extends AgentApiFixtures {
     void shouldExposeNineFunctionDefinitionsWithoutConfirmationOrIdentityParameters() {
         var response = restTemplate.getForEntity("/api/agent/tools", JsonNode.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).hasSize(9);
+        assertThat(response.getBody()).hasSize(10);
         for (JsonNode definition : response.getBody()) {
             assertThat(definition.path("type").asText()).isEqualTo("function");
             assertThat(definition.path("function").path("name").asText()).doesNotContain("confirm");

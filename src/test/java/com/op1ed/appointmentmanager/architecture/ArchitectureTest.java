@@ -119,4 +119,11 @@ class ArchitectureTest {
                 .should().dependOnClassesThat().resideInAPackage(BASE + ".agent..")
                 .check(productionClasses);
     }
+
+    @Test
+    void applicationAndDomainMustNotDependOnAgentFramework() {
+        noClasses().that().resideInAnyPackage(BASE + "..application..", BASE + "..domain..")
+                .should().dependOnClassesThat().resideInAnyPackage("com.alibaba.cloud.ai..", "org.springframework.ai..")
+                .check(productionClasses);
+    }
 }

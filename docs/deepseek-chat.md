@@ -73,10 +73,10 @@ python3 scripts/chat.py
 1. 确认会话归属，查询 `requestId` 是否已有保存的结果；有则直接返回。
 2. 检查模型配置，取得本实例并发名额。同一个账号一次只处理一条消息。
 3. 从数据库读取最近十轮，构造服务器系统提示和当前用户消息。
-4. 向模型提交九个函数工具定义。系统提示包含当前时间、默认时区和服务器确定的权限类型。
+4. Spring AI Alibaba ReactAgent 向模型提交十个函数工具定义。系统提示包含当前时间、默认时区和服务器确定的权限类型。
 5. 模型返回工具调用时，严格解析 JSON 参数，用 `AgentToolService` 执行业务查询或生成预览。
 6. 查询结果或业务错误以 `tool` 消息回传，模型可以据此继续查询、纠正参数或询问信息。
-7. 一旦生成动作，本轮立即停止，批次中剩余调用得到 `SKIPPED_AFTER_PREVIEW`；使用服务器回复和真实预览。
+7. Hook 和 Interceptor 在生成动作或流程后停止本轮；剩余调用得到 `SKIPPED_AFTER_PREVIEW` 或 `SKIPPED_AFTER_WORKFLOW`，返回服务器回复和真实结果。
 8. 用短事务锁住会话，确认修订号未变化，保存整轮消息、最终响应并增加修订号。
 
 ```mermaid
@@ -144,4 +144,4 @@ sequenceDiagram
 - `DeepSeekConversationIntegrationTest`：使用实际 HTTP 适配器和真实 MySQL，完成查询、预览、确认、改期与取消，不请求收费模型。
 - `scripts/verify_persistence.py`：验证应用重启后空会话和动作保存情况，不发送对话消息；真实会话体验使用 `scripts/chat.py`。
 
-阅读顺序建议为 `AgentConversationController → AgentChatService → AgentModel → DeepSeekAgentModel`，再看 `AgentConversationService` 的保存锁和请求重放，最后沿着工具调用阅读原有业务服务。V7 迁移只新增会话与轮次表，不修改历史迁移。
+阅读顺序建议为 `AgentConversationController → AgentChatService → AgentRuntime → SpringAiAgentRuntime → DeepSeekChatModelAdapter → DeepSeekAgentModel`，再看 `AgentConversationService` 的保存锁和请求重放。自定义改期流程、检查点和用户命令见 [Spring AI Alibaba 与改期 Graph](spring-ai-alibaba-graph.md)。V7 新增会话与轮次；V8 增加流程与检查点，历史迁移保持不变。

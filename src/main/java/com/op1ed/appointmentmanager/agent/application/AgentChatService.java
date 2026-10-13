@@ -1,17 +1,13 @@
 package com.op1ed.appointmentmanager.agent.application;
 
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
@@ -21,21 +17,19 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AgentChatService {
-    private final AgentModel model;
+    private final AgentRuntime runtime;
     private final AgentConversationService conversations;
     private final AgentToolCatalog catalog;
-    private final AgentToolService tools;
     private final ObjectMapper json;
     private final AgentChatPolicy policy;
     private final Semaphore capacity;
     private final Set<Long> activeUsers = ConcurrentHashMap.newKeySet();
 
-    public AgentChatService(AgentModel model, AgentConversationService conversations, AgentToolCatalog catalog,
-            AgentToolService tools, ObjectMapper json, AgentChatPolicy policy) {
-        this.model = model;
+    public AgentChatService(AgentRuntime runtime, AgentConversationService conversations, AgentToolCatalog catalog,
+            ObjectMapper json, AgentChatPolicy policy) {
+        this.runtime = runtime;
         this.conversations = conversations;
         this.catalog = catalog;
-        this.tools = tools;
         this.json = json;
         this.policy = policy;
         this.capacity = new Semaphore(policy.maxConcurrentRequests());
@@ -48,7 +42,7 @@ public class AgentChatService {
         if (previous.isPresent()) {
             return previous.get();
         }
-        if (!model.available()) {
+        if (!runtime.available()) {
             throw new BusinessException(ErrorCode.AGENT_UNAVAILABLE, "对话服务尚未启用，请先配置 DeepSeek");
         }
         if (!activeUsers.add(user.id())) {
@@ -75,103 +69,12 @@ public class AgentChatService {
     private AgentChatResult run(UserIdentity user, AgentConversationSnapshot snapshot, AgentChatCommand command) {
         List<AgentMessage> currentTurn = new ArrayList<>();
         currentTurn.add(AgentMessage.text("user", command.message()));
-        List<AgentMessage> messages = context(user, snapshot, currentTurn);
-        List<AgentToolExecution> executions = new ArrayList<>();
-        List<AgentActionResult> actions = new ArrayList<>();
-        long started = System.nanoTime();
-        int modelCalls = 0;
-        int toolCalls = 0;
-
-        while (modelCalls < policy.maxModelCalls()) {
-            if (contextSize(messages) > policy.maxContextChars()) {
-                return finish(user, snapshot, command, currentTurn, executions, actions, modelCalls,
-                        "LIMIT_REACHED", "本轮查询结果较多，请缩小姓名或时间范围后继续。", null);
-            }
-            Duration remaining = policy.timeout().minusNanos(System.nanoTime() - started);
-            if (remaining.isNegative() || remaining.isZero()) {
-                return timeout(user, snapshot, command, currentTurn, executions, modelCalls);
-            }
-
-            AgentModelReply reply;
-            modelCalls++;
-            try {
-                reply = model.complete(List.copyOf(messages), catalog.definitions(), remaining);
-            } catch (BusinessException exception) {
-                if (exception.getCode() != ErrorCode.MODEL_ERROR && exception.getCode() != ErrorCode.MODEL_TIMEOUT) {
-                    throw exception;
-                }
-                return finish(user, snapshot, command, currentTurn, executions, actions, modelCalls,
-                        "FAILED", exception.getMessage(), exception.getCode().name());
-            }
-            if (reply.toolCalls().isEmpty()) {
-                if (reply.content() == null || reply.content().isBlank()) {
-                    return finish(user, snapshot, command, currentTurn, executions, actions, modelCalls,
-                            "FAILED", "模型未返回有效回复，请稍后重试。", "MODEL_ERROR");
-                }
-                return finish(user, snapshot, command, currentTurn, executions, actions, modelCalls,
-                        "COMPLETED", reply.content(), null);
-            }
-            append(messages, currentTurn, AgentMessage.assistant(reply));
-            boolean exhausted = false;
-            boolean timedOut = false;
-            for (AgentModelToolCall call : reply.toolCalls()) {
-                if (!actions.isEmpty()) {
-                    append(messages, currentTurn, AgentMessage.tool(call.id(), toolError("SKIPPED_AFTER_PREVIEW", "已生成预览，请先由用户确认")));
-                    executions.add(new AgentToolExecution(call.id(), call.name(), false, "SKIPPED_AFTER_PREVIEW"));
-                    continue;
-                }
-                if (toolCalls >= policy.maxToolCalls()) {
-                    exhausted = true;
-                    append(messages, currentTurn, AgentMessage.tool(call.id(), toolError("TOOL_LIMIT_REACHED", "本轮工具调用次数已达到上限")));
-                    executions.add(new AgentToolExecution(call.id(), call.name(), false, "TOOL_LIMIT_REACHED"));
-                    continue;
-                }
-                if (System.nanoTime() - started >= policy.timeout().toNanos()) {
-                    timedOut = true;
-                    append(messages, currentTurn, AgentMessage.tool(call.id(), toolError("MODEL_TIMEOUT", "本轮时间预算已用完")));
-                    executions.add(new AgentToolExecution(call.id(), call.name(), false, "MODEL_TIMEOUT"));
-                    continue;
-                }
-                toolCalls++;
-                String output;
-                try {
-                    JsonNode arguments = json.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(call.arguments());
-                    AgentToolResult result = tools.execute(user, call.name(), arguments);
-                    output = write(Map.of("ok", true, "result", result.result()));
-                    if (result.result() instanceof AgentActionResult action) {
-                        // 动作已经保存，必须把它交给用户；数量和字段长度已受业务输入限制。
-                        actions.add(action);
-                        executions.add(new AgentToolExecution(call.id(), call.name(), true, null));
-                    } else if (output.length() > policy.maxToolResultChars()) {
-                        output = toolError("RESULT_TOO_LARGE", "结果过大，请减少 size 或增加筛选条件");
-                        executions.add(new AgentToolExecution(call.id(), call.name(), false, "RESULT_TOO_LARGE"));
-                    } else {
-                        executions.add(new AgentToolExecution(call.id(), call.name(), true, null));
-                    }
-                } catch (JsonProcessingException exception) {
-                    output = toolError("INVALID_ARGUMENT", "工具参数必须是一个合法的 JSON 对象");
-                    executions.add(new AgentToolExecution(call.id(), call.name(), false, "INVALID_ARGUMENT"));
-                } catch (BusinessException exception) {
-                    output = toolError(exception.getCode().name(), exception.getMessage());
-                    executions.add(new AgentToolExecution(call.id(), call.name(), false, exception.getCode().name()));
-                }
-                append(messages, currentTurn, AgentMessage.tool(call.id(), output));
-            }
-            if (!actions.isEmpty()) {
-                // 模型不决定写操作是否已经完成，也不生成确认链接的真实 ID。
-                return finish(user, snapshot, command, currentTurn, executions, actions, modelCalls, "ACTION_PENDING",
-                        "已生成操作预览，请核对返回的姓名、医生、时段和变更内容。预约尚未改变，需要通过动作确认接口确认。", null);
-            }
-            if (timedOut) {
-                return timeout(user, snapshot, command, currentTurn, executions, modelCalls);
-            }
-            if (exhausted || toolCalls >= policy.maxToolCalls()) {
-                return finish(user, snapshot, command, currentTurn, executions, actions, modelCalls,
-                        "LIMIT_REACHED", "本轮工具调用已达到上限，请缩小查询范围或补充预约信息后继续。", null);
-            }
-        }
-        return finish(user, snapshot, command, currentTurn, executions, actions, modelCalls,
-                "LIMIT_REACHED", "本轮模型调用已达到上限，请补充具体的医生、日期或预约信息后继续。", null);
+        AgentRunResult result = runtime.run(user, context(user, snapshot, currentTurn));
+        currentTurn.addAll(result.generatedMessages());
+        currentTurn.add(AgentMessage.text("assistant", result.reply()));
+        AgentChatResult response = new AgentChatResult(snapshot.id(), command.requestId(), result.status(), result.reply(),
+                result.actions(), result.toolExecutions(), result.modelCalls(), result.failureCode(), result.workflows());
+        return conversations.save(user, snapshot, command, currentTurn, response);
     }
 
     private List<AgentMessage> context(UserIdentity user, AgentConversationSnapshot snapshot, List<AgentMessage> currentTurn) {
@@ -183,6 +86,9 @@ public class AgentChatService {
                 使用提供的工具查询真实数据，不编造医生、时段、预约 ID 或可用性。默认 size=20，优先使用姓名、日期缩小范围。
                 多个候选或预约信息不足时先询问用户；用户选择上一轮结果时仍以当前工具查询验证为准。
                 创建、取消、改期只能生成 prepare_* 动作预览，不能声称预约已经成功、取消或改期。
+                改期请求优先用 start_rescheduling_workflow 开始可恢复流程：先查清预约 ID 和带时区的目标时间范围。
+                信息不完整时先询问用户；不能虚构预约 ID、医生 ID 或时间。流程由用户选择时段、核对预览并独立确认。
+                模型工具不能选择、确认、刷新或结束改期流程。返回 workflow 后等待用户操作客户端。
                 一轮对话最多准备一个动作。需要姓名、时段或预约 ID 时查询或向用户询问，不能猜测。
                 用户说“确认”也不能执行预约变更，提醒用户查看服务器动作预览并通过独立确认接口确认。
                 工具不存在、参数非法或访问被拒绝时依据错误更正；不要尝试 SQL、HTTP、确认工具或指定他人身份。
@@ -207,30 +113,6 @@ public class AgentChatService {
 
     private int contextSize(List<AgentMessage> messages) {
         return write(messages).length() + write(catalog.definitions()).length();
-    }
-
-    private AgentChatResult timeout(UserIdentity user, AgentConversationSnapshot snapshot, AgentChatCommand command,
-            List<AgentMessage> turn, List<AgentToolExecution> executions, int modelCalls) {
-        return finish(user, snapshot, command, turn, executions, List.of(), modelCalls,
-                "FAILED", "本轮模型请求超过时间预算，请稍后重试。", "MODEL_TIMEOUT");
-    }
-
-    private AgentChatResult finish(UserIdentity user, AgentConversationSnapshot snapshot, AgentChatCommand command,
-            List<AgentMessage> turn, List<AgentToolExecution> executions, List<AgentActionResult> actions,
-            int modelCalls, String status, String reply, String failureCode) {
-        turn.add(AgentMessage.text("assistant", reply));
-        AgentChatResult response = new AgentChatResult(snapshot.id(), command.requestId(), status, reply,
-                actions, executions, modelCalls, failureCode);
-        return conversations.save(user, snapshot, command, turn, response);
-    }
-
-    private void append(List<AgentMessage> context, List<AgentMessage> turn, AgentMessage message) {
-        context.add(message);
-        turn.add(message);
-    }
-
-    private String toolError(String code, String detail) {
-        return write(Map.of("ok", false, "error", Map.of("code", code, "detail", detail)));
     }
 
     private String write(Object value) {

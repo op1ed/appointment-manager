@@ -1,6 +1,9 @@
 package com.op1ed.appointmentmanager.agent.application;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.UUID;
+import com.op1ed.appointmentmanager.agent.application.workflow.ReschedulingWorkflowService;
+import com.op1ed.appointmentmanager.agent.application.workflow.WorkflowCommands;
 import com.op1ed.appointmentmanager.appointment.application.AppointmentHistoryQuery;
 import com.op1ed.appointmentmanager.appointment.application.AppointmentQuery;
 import com.op1ed.appointmentmanager.appointment.application.AppointmentService;
@@ -22,14 +25,16 @@ public class AgentToolService {
     private final SlotService slots;
     private final AppointmentService appointments;
     private final AgentActionService actions;
+    private final ReschedulingWorkflowService workflows;
 
     public AgentToolService(AgentToolCatalog catalog, DoctorService doctors, SlotService slots,
-            AppointmentService appointments, AgentActionService actions) {
+            AppointmentService appointments, AgentActionService actions, ReschedulingWorkflowService workflows) {
         this.catalog = catalog;
         this.doctors = doctors;
         this.slots = slots;
         this.appointments = appointments;
         this.actions = actions;
+        this.workflows = workflows;
     }
 
     public AgentToolResult execute(UserIdentity caller, String name, JsonNode arguments) {
@@ -52,6 +57,8 @@ public class AgentToolService {
             case "prepare_cancellation" -> actions.prepareCancellation(user, input.id("appointmentId"));
             case "prepare_rescheduling" -> actions.prepareRescheduling(user, input.id("appointmentId"),
                     new RescheduleAppointmentCommand(input.id("expectedSlotId"), input.id("targetSlotId")));
+            case "start_rescheduling_workflow" -> workflows.start(user, new WorkflowCommands.Start(UUID.randomUUID().toString(),
+                    input.id("appointmentId"), input.optionalId("doctorId"), input.time("from"), input.time("to")));
             default -> throw new BusinessException(ErrorCode.INVALID_ARGUMENT, "工具名称不存在");
         };
         return new AgentToolResult(name, result);

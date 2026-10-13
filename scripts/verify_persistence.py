@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 import time
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -245,8 +246,8 @@ def main():
         raise RuntimeError("The reschedule record must identify both slots.")
 
     definitions = request_json("/api/agent/tools")
-    if not isinstance(definitions, list) or len(definitions) != 9:
-        raise RuntimeError("The Agent catalog must contain nine tools.")
+    if not isinstance(definitions, list) or len(definitions) != 10:
+        raise RuntimeError("The Agent catalog must contain ten tools.")
     pending_action = prepare_agent_booking(slot_id)
     pending_path = "/api/agent/actions/" + pending_action["id"]
     check_slot_availability(doctor_id, slot_id, True)
@@ -272,6 +273,25 @@ def main():
     conversation_path = "/api/agent/conversations/" + conversation["id"]
     if conversation.get("revision") != 0 or conversation.get("turns") != []:
         raise RuntimeError("A new Agent conversation must be empty.")
+
+    # 新建独立时段，避免影响前面的动作确认测试；Graph 自身不调用模型。
+    workflow_slot = request_json(f"/api/doctors/{doctor_id}/slots", method="POST", body={
+        "startTime": (start_time + timedelta(minutes=90)).isoformat(),
+        "endTime": (start_time + timedelta(minutes=120)).isoformat(),
+    }, expected_status=201)
+    workflow = request_json("/api/agent/rescheduling-workflows", method="POST", expected_status=201, body={
+        "requestId": str(uuid4()), "appointmentId": agent_appointment_id,
+        "from": (start_time + timedelta(minutes=90)).isoformat(),
+        "to": (start_time + timedelta(minutes=120)).isoformat(),
+    })
+    workflow_path = "/api/agent/rescheduling-workflows/" + workflow["id"]
+    if workflow["status"] != "WAITING_FOR_SELECTION" or len(workflow["candidates"]) != 1:
+        raise RuntimeError("The Graph must pause before selection.")
+    workflow = request_json(workflow_path + "/selection", method="POST", body={
+        "requestId": str(uuid4()), "expectedRevision": workflow["revision"], "targetSlotId": workflow_slot["id"],
+    })
+    if workflow["status"] != "WAITING_FOR_CONFIRMATION":
+        raise RuntimeError("The Graph must pause again before explicit confirmation.")
 
     print(f"Verified cancellation, rebooking, and rescheduling of appointment {replacement_id}. Restarting app...", flush=True)
     subprocess.run(
@@ -307,8 +327,19 @@ def main():
         raise RuntimeError("The pending Agent action cannot be confirmed after restarting the app.")
     check_slot_availability(doctor_id, slot_id, False)
 
+    if request_json(workflow_path) != workflow:
+        raise RuntimeError("The paused Graph changed after restarting the app.")
+    confirmation = {"requestId": str(uuid4()), "expectedRevision": workflow["revision"]}
+    resumed = request_json(workflow_path + "/confirm", method="POST", body=confirmation)
+    if resumed["status"] != "COMPLETED" or resumed["action"]["result"]["slotId"] != workflow_slot["id"]:
+        raise RuntimeError("The Graph could not resume its persisted checkpoint after restart.")
+    if request_json(workflow_path + "/confirm", method="POST", body=confirmation) != resumed:
+        raise RuntimeError("Graph confirmation replay changed the saved result.")
+    if request_json(f"/api/appointments/{agent_appointment_id}/history")["totalElements"] != 2:
+        raise RuntimeError("Graph confirmation retries duplicated operation records.")
+
     print(
-        f"PASS: appointment {replacement_id}, login, cancellation, rescheduling, events, Agent actions, and conversation survived restart.",
+        f"PASS: appointment {replacement_id}, login, events, Agent actions, conversation, and paused Graph survived restart and resumed.",
         flush=True,
     )
 

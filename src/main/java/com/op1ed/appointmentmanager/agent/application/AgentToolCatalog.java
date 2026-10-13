@@ -38,7 +38,11 @@ public class AgentToolCatalog {
                         fields("appointmentId", id("预约 ID")), "appointmentId"),
                 tool("prepare_rescheduling", "生成改期预览，保留原预约直到用户确认。expectedSlotId 必须是查询得到的当前时段 ID。",
                         fields("appointmentId", id("预约 ID"), "expectedSlotId", id("查询得到的当前时段 ID"),
-                                "targetSlotId", id("目标时段 ID")), "appointmentId", "expectedSlotId", "targetSlotId")
+                                "targetSlotId", id("目标时段 ID")), "appointmentId", "expectedSlotId", "targetSlotId"),
+                tool("start_rescheduling_workflow", "开始可恢复的改期流程。服务器查询候选并暂停，由用户选择、核对预览和确认。优先用于自然语言改期请求。不会修改预约。",
+                        fields("appointmentId", id("查询得到的预约 ID"), "doctorId", id("目标医生 ID；省略则使用原医生"),
+                                "from", time("候选开始时间下界"), "to", time("候选开始时间上界；时间范围不超过 31 天")),
+                        "appointmentId", "from", "to")
         );
     }
 

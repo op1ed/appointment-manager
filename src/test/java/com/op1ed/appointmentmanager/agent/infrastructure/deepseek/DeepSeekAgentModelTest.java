@@ -85,7 +85,7 @@ class DeepSeekAgentModelTest {
         assertThat(request.path("thinking").path("type").asText()).isEqualTo("disabled");
         assertThat(request.path("stream").asBoolean()).isFalse();
         assertThat(request.path("max_tokens").asInt()).isEqualTo(2048);
-        assertThat(request.path("tools")).hasSize(9);
+        assertThat(request.path("tools")).hasSize(10);
         assertThat(request.path("messages").get(2).path("tool_calls").get(0).path("function").path("arguments").asText()).isEqualTo(call.arguments());
         assertThat(request.path("messages").get(3).path("tool_call_id").asText()).isEqualTo(call.id());
         assertThat(request.toString()).doesNotContain("test-api-key", "reasoning_content", "ownerId");

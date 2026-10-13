@@ -1,6 +1,6 @@
 # Agent 工具与动作确认
 
-业务能力封装成模型可以调用的九个函数工具。可以通过 HTTP 测试工具，也可以由 DeepSeek 对话应用服务调用 `AgentToolService`。模型请求、多轮会话与调用循环现已实现，启用方式见 [DeepSeek 对话说明](deepseek-chat.md)。自动化测试使用模拟模型，不调用收费 API。
+业务能力封装成模型可以调用的十个函数工具。可以通过 HTTP 测试工具，也可以由 Spring AI Alibaba ReactAgent 调用 `AgentToolService`。启用方式见 [DeepSeek 对话说明](deepseek-chat.md)，可恢复改期见 [Graph 说明](spring-ai-alibaba-graph.md)。自动化测试使用模拟模型，不调用收费 API。
 
 ## 当前调用流程
 
@@ -63,10 +63,13 @@ sequenceDiagram
 | `prepare_booking` | `customerName`、`slotId` | 无 | 新预约动作预览 |
 | `prepare_cancellation` | `appointmentId` | 无 | 取消动作预览，保存预览时的时段 |
 | `prepare_rescheduling` | `appointmentId`、`expectedSlotId`、`targetSlotId` | 无 | 原预约与目标时段的改期预览 |
+| `start_rescheduling_workflow` | `appointmentId`、`from`、`to` | `doctorId`，省略使用原医生 | 候选时段、流程 ID 和 revision，等待用户选择与确认 |
 
 分页默认 `page=0`、`size=20`，每页 1～100 条，`page * size` 不得超过 `Integer.MAX_VALUE`。分页与总数在数据库中计算，工具不会先加载整个列表再截断。医生按 `id` 排序，空闲时段按 `startTime, id` 排序。
 
 查询时间必须是带时区的 ISO 8601 字符串，条件是开始时间的半开区间 `[from, to)`；省略或传 `null` 表示该边界不限。姓名和状态等可选筛选条件也可以为 `null`。`page`、`size` 和必填 ID 不能为 `null`。数字必须是 JSON 整数，不能用字符串、浮点数或超出范围的值代替。未知字段、未知工具名会返回 400。
+
+改期流程工具的 from、to 必填且不能为 null，范围最长 31 天；doctorId 可省略，不能为 null。选择、确认、刷新、结束流程都不在模型工具目录中。流程关联动作通过流程确认接口执行，不能用普通动作确认接口绕过；撤回状态为 REVOKED。
 
 `search_available_slots` 只返回未来且当前没有 `BOOKED` 预约的时段，取消记录不占用时段。查询结果不保证稍后仍有空位，确认时会再次检查。
 

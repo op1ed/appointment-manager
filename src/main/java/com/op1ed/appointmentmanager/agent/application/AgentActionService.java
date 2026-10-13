@@ -26,6 +26,7 @@ import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 @Service
 @Transactional(readOnly = true)
@@ -70,6 +71,17 @@ public class AgentActionService {
     @Transactional
     public AgentActionResult prepareRescheduling(UserIdentity caller, long appointmentId,
             RescheduleAppointmentCommand command) {
+        return prepareRescheduling(caller, appointmentId, command, null);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public AgentActionResult prepareWorkflowRescheduling(UserIdentity caller, String workflowId, long appointmentId,
+            RescheduleAppointmentCommand command) {
+        return prepareRescheduling(caller, appointmentId, command, AgentIds.requireUuid(workflowId, "流程 ID"));
+    }
+
+    private AgentActionResult prepareRescheduling(UserIdentity caller, long appointmentId,
+            RescheduleAppointmentCommand command, String workflowId) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
         AppointmentResult original = requireAppointment(user, appointmentId);
         if (!original.booked() || original.slotId() == null) {
@@ -83,9 +95,13 @@ public class AgentActionService {
         }
         SlotResult target = original.slotId().equals(command.targetSlotId())
                 ? requireSlot(command.targetSlotId()) : requireAvailableSlot(command.targetSlotId());
-        return save(user, AgentActionKind.RESCHEDULE, original.id(), null, original.slotId(), target.id(),
-                new AgentActionPreview("将以下预约改到新的医生和时段，确认前原预约保持不变", original,
-                        proposal(original.customerName(), target)));
+        Instant created = Instant.now();
+        AgentAction action = new AgentAction(UUID.randomUUID().toString(), user.id(), AgentActionKind.RESCHEDULE,
+                original.id(), null, original.slotId(), target.id(), writeJson(new AgentActionPreview(
+                        "将以下预约改到新的医生和时段，确认前原预约保持不变", original,
+                        proposal(original.customerName(), target))), created, created.plus(actionTtl));
+        if (workflowId != null) { action.assignWorkflow(workflowId); }
+        return toResult(actions.save(action));
     }
 
     public AgentActionResult find(UserIdentity caller, String id) {
@@ -99,8 +115,36 @@ public class AgentActionService {
         // 此事务的第一条业务查询使用当前读并锁住动作。重试和并发确认都返回首次执行的结果。
         AgentAction action = actions.findByIdAndOwnerIdForUpdate(requireActionId(id), user.id())
                 .orElseThrow(this::notFound);
+        if (action.getWorkflowId() != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "请通过改期流程确认接口确认此预览");
+        }
+        return confirmLocked(user, action);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public AgentActionResult confirmForWorkflow(UserIdentity caller, String workflowId, String id) {
+        UserIdentity user = UserIdentity.requireAuthenticated(caller);
+        return confirmLocked(user, lockWorkflowAction(user, workflowId, id));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void revokeForWorkflow(UserIdentity caller, String workflowId, String id) {
+        lockWorkflowAction(UserIdentity.requireAuthenticated(caller), workflowId, id).revoke();
+        actions.flush();
+    }
+
+    private AgentAction lockWorkflowAction(UserIdentity user, String workflowId, String id) {
+        AgentAction action = actions.findByIdAndOwnerIdForUpdate(requireActionId(id), user.id()).orElseThrow(this::notFound);
+        if (!AgentIds.requireUuid(workflowId, "流程 ID").equals(action.getWorkflowId())) { throw notFound(); }
+        return action;
+    }
+
+    private AgentActionResult confirmLocked(UserIdentity user, AgentAction action) {
         if (action.getStatus() == AgentActionStatus.CONFIRMED) {
             return toResult(action);
+        }
+        if (action.getStatus() == AgentActionStatus.REVOKED) {
+            throw new BusinessException(ErrorCode.CONFLICT, "动作预览已撤回，请重新生成预览");
         }
         Instant acceptedAt = Instant.now();
         if (action.isExpiredAt(acceptedAt)) {
@@ -156,7 +200,7 @@ public class AgentActionService {
         String state = action.isExpiredAt(Instant.now()) ? "EXPIRED" : action.getStatus().name();
         return new AgentActionResult(action.getId(), action.getKind().name(), state, action.getCreatedAt(),
                 action.getExpiresAt(), action.getConfirmedAt(), readJson(action.getPreviewJson()),
-                action.getResultJson() == null ? null : readJson(action.getResultJson()));
+                action.getResultJson() == null ? null : readJson(action.getResultJson()), action.getWorkflowId());
     }
 
     private String requireActionId(String id) {

@@ -63,6 +63,7 @@ class DeepSeekConversationIntegrationTest extends AgentApiFixtures {
 
     @Test
     void shouldRunRealHttpAdapterToolLoopPersistenceAndSeparateBookingRescheduleCancellationConfirmation() throws Exception {
+        REQUESTS.clear(); REPLIES.clear();
         var slots = createSlots(2);
         var owner = normalUser();
         var created = owner.client().postForEntity("/api/agent/conversations", null, JsonNode.class);
@@ -78,7 +79,7 @@ class DeepSeekConversationIntegrationTest extends AgentApiFixtures {
         assertThat(booking.getBody().path("modelCalls").asInt()).isEqualTo(3);
         assertThat(REQUESTS).hasSize(3);
         assertThat(REQUESTS.element().path("thinking").path("type").asText()).isEqualTo("disabled");
-        assertThat(REQUESTS.element().path("tools")).hasSize(9);
+        assertThat(REQUESTS.element().path("tools")).hasSize(10);
         var rawRequests = List.copyOf(REQUESTS);
         assertThat(PROVIDER_JSON.readTree(rawRequests.get(1).path("messages").get(3).path("content").asText())
                 .path("result").path("content").get(0).path("id").asLong()).isEqualTo(slots.get(0).id());
@@ -111,6 +112,27 @@ class DeepSeekConversationIntegrationTest extends AgentApiFixtures {
         assertThat(saved.path("turns")).hasSize(3);
         assertThat(REQUESTS).hasSize(5);
         assertThat(REPLIES).isEmpty();
+    }
+
+    @Test void shouldStartCustomGraphFromRealFrameworkToolAndStopBeforeSelection() throws Exception {
+        REQUESTS.clear(); REPLIES.clear();
+        var slots = createSlots(2); var owner = normalUser(); var appointment = book(owner.client(), slots.get(0).id());
+        var conversation = owner.client().postForEntity("/api/agent/conversations", null, JsonNode.class).getBody();
+        String path = "/api/agent/conversations/" + conversation.path("id").asText() + "/messages";
+        REPLIES.add(toolResponse("start_rescheduling_workflow", Map.of("appointmentId", appointment.id(),
+                "from", slots.get(0).startTime().toString(), "to", slots.get(1).endTime().toString())));
+        var command = Map.of("requestId", UUID.randomUUID().toString(), "message", "把我的预约改到明天的另一个时段");
+        var reply = owner.client().postForEntity(path, command, JsonNode.class);
+        assertThat(reply.getStatusCode()).as("%s", reply.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(reply.getBody().path("status").asText()).isEqualTo("WORKFLOW_PENDING");
+        assertThat(reply.getBody().path("workflows")).hasSize(1);
+        var workflow = reply.getBody().path("workflows").get(0);
+        assertThat(workflow.path("nextNode").asText()).isEqualTo("await_selection");
+        assertThat(REQUESTS).hasSize(1);
+        assertThat(owner.client().postForEntity(path, command, JsonNode.class).getBody()).isEqualTo(reply.getBody());
+        assertThat(REQUESTS).hasSize(1);
+        assertThat(detail(owner.client(), appointment.id()).slotId()).isEqualTo(slots.get(0).id());
+        assertThat(owner.client().getForEntity("/api/agent/rescheduling-workflows/" + workflow.path("id").asText(), JsonNode.class).getBody()).isEqualTo(workflow);
     }
 
     private String toolResponse(String name, Object arguments) throws Exception {

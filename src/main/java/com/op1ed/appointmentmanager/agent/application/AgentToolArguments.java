@@ -36,6 +36,8 @@ public final class AgentToolArguments {
         return arguments.path(name).longValue();
     }
 
+    public Long optionalId(String name) { return arguments.hasNonNull(name) ? id(name) : null; }
+
     public int page() {
         return arguments.has("page") ? arguments.get("page").intValue() : 0;
     }

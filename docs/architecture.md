@@ -9,7 +9,7 @@
 | `doctor` | 医生资料 | 创建、查询医生；为排班锁定医生记录 |
 | `appointment` | 排班时段、预约、取消、改期、操作记录、占用规则 | 发布时段、查询可用性、创建、取消和改期预约、查询操作记录 |
 | `identity` | 账号、密码校验、登录令牌与身份信息 | 注册、登录、验证令牌、退出、初始化管理员；提供 `UserIdentity` |
-| `agent` | 工具目录、参数校验、动作预览、确认结果、会话与对话轮次 | DeepSeek 对话、受限工具循环、用户确认、上下文保存与请求结果重放 |
+| `agent` | 工具、动作、会话、改期流程、检查点与请求日志 | ReactAgent 对话、StateGraph 用户确认与恢复、权限、预算、结果重放 |
 | `shared` | 各模块共用的错误定义与 HTTP 错误转换 | 业务异常、统一错误响应 |
 
 `shared` 保持小范围，不承载医生或预约业务。`agent` 通过业务应用服务使用医生和预约能力，不直接查询这些模块的表或导入其实体；它拥有自己的动作、会话和对话轮次表。模型 HTTP 适配器位于 `agent.infrastructure.deepseek`。
@@ -51,7 +51,8 @@ com.op1ed.appointmentmanager
 │   ├── domain
 │   └── infrastructure
 │       ├── persistence
-│       └── deepseek
+│       ├── deepseek
+│       └── springai
 └── shared
     ├── error
     └── web
@@ -184,20 +185,27 @@ Agent 确认在最外层开启写事务，第一条业务查询锁定当前账�
 
 ### 模型接口与适配器
 
-`agent.application.AgentModel` 是一个有实际替换用途的接口：应用层通过它请求模型回复，`agent.infrastructure.deepseek.DeepSeekAgentModel` 负责 HTTP、认证头、消息格式、超时和响应校验；测试可以替换模型来验证工具循环，也可以用本地 HTTP 服务验证真实适配器。应用层不导入 HTTP 客户端。
+`AgentRuntime` 隔离 Agent 框架，`SpringAiAgentRuntime` 用 ReactAgent 执行对话。`AgentModel` 隔离模型提供方，`DeepSeekChatModelAdapter` 将标准 ChatModel 转到 `DeepSeekAgentModel`，保留 HTTP、超时和响应校验。`ReschedulingGraph` 隔离工作流框架，`SpringAiReschedulingGraph` 使用 StateGraph。框架类型只在 infrastructure.springai 中出现，应用层和领域层由 ArchUnit 检查这个边界。
 
 ```mermaid
 flowchart LR
     WEB[会话 Controller] --> CHAT[AgentChatService]
-    CHAT --> PORT[AgentModel 接口]
+    CHAT --> RUNTIME[AgentRuntime 接口]
+    RUNTIME --> REACT[SpringAiAgentRuntime / ReactAgent]
+    REACT --> PORT[AgentModel 接口]
     ADAPTER[DeepSeek HTTP 适配器] -. 实现 .-> PORT
     ADAPTER --> REMOTE[DeepSeek API]
-    CHAT --> TOOLS[AgentToolService]
+    REACT --> TOOLS[AgentToolService]
+    TOOLS --> FLOW[改期流程服务]
+    FLOW --> GRAPH[ReschedulingGraph / StateGraph]
+    GRAPH --> CHECKPOINT[JpaWorkflowCheckpointSaver]
     CHAT --> STORE[AgentConversationService]
     STORE --> TABLES[会话与轮次 Repository]
 ```
 
 这是在原有轻量分层上，为外部模型增加接口和适配器；没有为每个内部服务机械添加接口。对话协议、输入输出及限制见 [DeepSeek 对话说明](deepseek-chat.md)。
+
+改期 Graph 每次推进使用一个短事务；工作流、检查点、动作、预约、操作记录、请求响应一起提交。冲突先完整回滚，再开启恢复事务重新查询。具体状态、READ_COMMITTED 的原因和恢复 API 见 [Graph 阅读指南](spring-ai-alibaba-graph.md)。
 
 ## 错误如何从业务层到 HTTP
 
