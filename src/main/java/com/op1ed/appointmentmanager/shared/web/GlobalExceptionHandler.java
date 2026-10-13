@@ -27,6 +27,9 @@ public class GlobalExceptionHandler {
             case CONFLICT -> HttpStatus.CONFLICT;
             case UNAUTHENTICATED -> HttpStatus.UNAUTHORIZED;
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case AGENT_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+            case MODEL_ERROR -> HttpStatus.BAD_GATEWAY;
+            case MODEL_TIMEOUT -> HttpStatus.GATEWAY_TIMEOUT;
         };
         ResponseEntity.BodyBuilder response = ResponseEntity.status(status);
         if (status == HttpStatus.UNAUTHORIZED) {

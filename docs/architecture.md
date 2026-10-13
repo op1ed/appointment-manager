@@ -9,10 +9,10 @@
 | `doctor` | 医生资料 | 创建、查询医生；为排班锁定医生记录 |
 | `appointment` | 排班时段、预约、取消、改期、操作记录、占用规则 | 发布时段、查询可用性、创建、取消和改期预约、查询操作记录 |
 | `identity` | 账号、密码校验、登录令牌与身份信息 | 注册、登录、验证令牌、退出、初始化管理员；提供 `UserIdentity` |
-| `agent` | 工具目录、参数校验、动作预览、确认结果 | 调用业务应用服务查询或准备动作；用户确认后执行；保存幂等结果 |
+| `agent` | 工具目录、参数校验、动作预览、确认结果、会话与对话轮次 | DeepSeek 对话、受限工具循环、用户确认、上下文保存与请求结果重放 |
 | `shared` | 各模块共用的错误定义与 HTTP 错误转换 | 业务异常、统一错误响应 |
 
-`shared` 保持小范围，不承载医生或预约业务。`agent` 通过业务应用服务使用医生和预约能力，不直接查询这些模块的表或导入其实体；它只拥有自己的 `agent_actions` 表。当前工具层已经实现，模型适配器将在后续加入。
+`shared` 保持小范围，不承载医生或预约业务。`agent` 通过业务应用服务使用医生和预约能力，不直接查询这些模块的表或导入其实体；它拥有自己的动作、会话和对话轮次表。模型 HTTP 适配器位于 `agent.infrastructure.deepseek`。
 
 ### 为什么时段与预约属于同一个模块
 
@@ -50,7 +50,8 @@ com.op1ed.appointmentmanager
 │   ├── application
 │   ├── domain
 │   └── infrastructure
-│       └── persistence
+│       ├── persistence
+│       └── deepseek
 └── shared
     ├── error
     └── web
@@ -179,7 +180,24 @@ V4 之前的预约 `owner_id` 为空，只向管理员开放，普通用户不�
 
 Agent 确认在最外层开启写事务，第一条业务查询锁定当前账号的动作记录。然后直接调用创建、取消或改期应用服务，加入同一事务；预约服务保持原有预约和时段锁顺序。动作确认之前不再重做普通查询，避免 MySQL 的事务快照早于业务锁等待完成。最后保存预约结果快照并刷新动作记录，任何一环失败都回滚业务变更和确认状态。两个请求确认同一个动作时，后者等待动作行锁并返回前者保存的结果。
 
-模型调用将在这个事务之外进行，数据库锁不应跨越外部 API 网络等待。详细的预览与确认边界见 [Agent 工具与动作确认](agent-tools.md)。
+`AgentChatService` 不开启事务。历史读取、单个工具执行、对话保存分别使用短事务；模型网络等待不持有数据库事务或行锁。保存对话时先锁会话，再校验读取时的修订号，避免覆盖另一请求已经保存的上下文。详细的预览与确认边界见 [Agent 工具与动作确认](agent-tools.md)。
+
+### 模型接口与适配器
+
+`agent.application.AgentModel` 是一个有实际替换用途的接口：应用层通过它请求模型回复，`agent.infrastructure.deepseek.DeepSeekAgentModel` 负责 HTTP、认证头、消息格式、超时和响应校验；测试可以替换模型来验证工具循环，也可以用本地 HTTP 服务验证真实适配器。应用层不导入 HTTP 客户端。
+
+```mermaid
+flowchart LR
+    WEB[会话 Controller] --> CHAT[AgentChatService]
+    CHAT --> PORT[AgentModel 接口]
+    ADAPTER[DeepSeek HTTP 适配器] -. 实现 .-> PORT
+    ADAPTER --> REMOTE[DeepSeek API]
+    CHAT --> TOOLS[AgentToolService]
+    CHAT --> STORE[AgentConversationService]
+    STORE --> TABLES[会话与轮次 Repository]
+```
+
+这是在原有轻量分层上，为外部模型增加接口和适配器；没有为每个内部服务机械添加接口。对话协议、输入输出及限制见 [DeepSeek 对话说明](deepseek-chat.md)。
 
 ## 错误如何从业务层到 HTTP
 

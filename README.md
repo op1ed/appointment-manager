@@ -21,8 +21,11 @@
 - 九个 Agent 工具：分页查询医生、空闲时段、预约和操作记录，生成预约、取消、改期预览。
 - 动作预览保存到数据库，默认五分钟有效；只有生成动作的账号可以读取和确认。
 - 确认时复用业务服务；重复确认返回首次结果，预约、操作记录和确认结果在同一事务中保存。
+- DeepSeek 多轮对话与受限工具调用循环；生成动作预览后立即停止，用户通过独立接口确认。
+- 会话和完整轮次保存到数据库，同一会话中的请求 ID 可重放已保存结果；历史按完整轮次裁剪。
+- 模型连接超时、模型与工具调用次数、上下文大小、查询结果大小和并发请求均有限制。
 
-一个时段接待一位用户。当前已完成可独立测试的 Agent 工具层，真实 DeepSeek 模型调用和自然语言对话将在后续接入。现在不需要模型 API Key，也不会产生模型调用费用。工具参数、流程和代码阅读顺序见 [Agent 工具与动作确认](docs/agent-tools.md)。
+一个时段接待一位用户。已实现 DeepSeek HTTP 适配器和自然语言对话入口；默认关闭真实模型调用，配置 API Key 并启用后才能使用。CI 用本地模拟模型服务验证，不调用收费 API。工具参数和确认规则见 [Agent 工具与动作确认](docs/agent-tools.md)，启用方法和会话流程见 [DeepSeek 对话说明](docs/deepseek-chat.md)。
 
 ## 技术与运行方式
 
@@ -36,6 +39,7 @@
 | 持续集成 | GitHub Actions，使用真实 MySQL 执行测试并生成 JAR |
 | 部署 | Docker 多阶段构建、Docker Compose |
 | 部署验证 | Python 3 标准库脚本，验证业务数据、操作记录和 Agent 动作的重启持久化 |
+| Agent | DeepSeek Chat Completions、应用层模型接口、受限工具循环、持久化会话与请求结果 |
 
 当前学习流程是在本地编辑代码，推送到 `main` 后由 GitHub Actions 编译和测试，再在 Ubuntu 服务器更新并部署。该流程不要求本地安装 Java、Maven 或 MySQL。
 
@@ -64,10 +68,28 @@ CI 与部署是两步：当前工作流不会自动更新服务器。Docker 镜�
 | POST | `/api/agent/tools/execute` | 执行查询或生成动作预览 | 登录，沿用业务权限 | 200 |
 | GET | `/api/agent/actions/{id}` | 读取已保存的动作预览和结果 | 生成动作的账号 | 200 |
 | POST | `/api/agent/actions/{id}/confirm` | 用户确认执行保存的动作 | 生成动作的账号 | 200 |
+| POST | `/api/agent/conversations` | 创建空会话，不调用模型 | 登录 | 201 |
+| GET | `/api/agent/conversations/{id}` | 查看会话和最近十轮 | 会话创建账号 | 200 |
+| POST | `/api/agent/conversations/{id}/messages` | 发送消息，按请求 ID 重放结果 | 会话创建账号 | 200 / 502 / 504 |
 
 注册请求包含 `username`、`displayName`、`password`；登录请求包含 `username`、`password`。用户名去首尾空格、转换小写，允许 3～50 位英文字母、数字、下划线和连字符。密码至少 8 个字符，UTF-8 编码后最多 72 字节，保留原始空格和大小写。
 
 登录返回 `accessToken`、`tokenType=Bearer`、UTC `expiresAt` 和 `user`。受保护接口使用 `Authorization: Bearer <accessToken>`。令牌默认有效 24 小时，数据库只保存令牌散列；应用重启不会清空登录，退出只撤销当前令牌。这里不使用登录 Cookie 或 HTTP Session。详细流程与取舍见 [身份与权限说明](docs/identity-and-permissions.md)。
+
+### 在服务器启用对话
+
+在现有 Ubuntu 项目目录中，先确认对应提交的 CI 通过，再执行：
+
+```bash
+git pull --ff-only
+python3 scripts/configure_deepseek.py
+sudo docker compose up -d --build app
+python3 scripts/chat.py
+```
+
+配置脚本隐藏 API Key 的输入，保留 `.env` 中的数据库和管理员配置；不要把 Key 发到聊天或提交到 Git。重建应用容器后，新环境变量才会生效。对话脚本用普通账号或管理员账号登录，支持多轮交流、查看历史和显式确认；发送新消息可能产生 DeepSeek API 费用。代码和模拟测试已验证，真实账号的模型调用需要配置后在服务器验证。
+
+如果当前不启用模型，原有业务接口、工具接口和动作确认仍可使用。`scripts/verify_persistence.py` 不会调用模型 API。
 
 创建预约的请求体为：
 

@@ -33,6 +33,9 @@ services:
       DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
       APP_ADMIN_USERNAME: "${ADMIN_USERNAME:-}"
       APP_ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      AGENT_ENABLED: "${AGENT_ENABLED:-false}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-flash}"
     depends_on:
       db:
         condition: service_healthy

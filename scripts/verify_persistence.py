@@ -267,6 +267,12 @@ def main():
     if request_json(confirmed_path + "/confirm", method="POST") != confirmed_action:
         raise RuntimeError("Agent confirmation retries must return the saved result.")
 
+    # 这里只创建会话，不发送对话消息，因此验证脚本不会调用收费模型。
+    conversation = request_json("/api/agent/conversations", method="POST", expected_status=201)
+    conversation_path = "/api/agent/conversations/" + conversation["id"]
+    if conversation.get("revision") != 0 or conversation.get("turns") != []:
+        raise RuntimeError("A new Agent conversation must be empty.")
+
     print(f"Verified cancellation, rebooking, and rescheduling of appointment {replacement_id}. Restarting app...", flush=True)
     subprocess.run(
         ["docker", "compose", "restart", "app"],
@@ -289,6 +295,8 @@ def main():
 
     if request_json(pending_path) != pending_action:
         raise RuntimeError("The pending Agent action changed after restarting the app.")
+    if request_json(conversation_path) != conversation:
+        raise RuntimeError("The Agent conversation changed after restarting the app.")
     if request_json(confirmed_path) != confirmed_action or request_json(confirmed_path + "/confirm", method="POST") != confirmed_action:
         raise RuntimeError("The confirmed Agent result changed after restarting the app.")
     if request_json(f"/api/appointments/{agent_appointment_id}/history")["totalElements"] != 1:
@@ -300,7 +308,7 @@ def main():
     check_slot_availability(doctor_id, slot_id, False)
 
     print(
-        f"PASS: appointment {replacement_id}, login, cancellation, rescheduling, events, and Agent actions survived restart.",
+        f"PASS: appointment {replacement_id}, login, cancellation, rescheduling, events, Agent actions, and conversation survived restart.",
         flush=True,
     )
 

@@ -32,6 +32,7 @@ class ArchitectureTest {
         ).should().dependOnClassesThat().resideInAnyPackage(
                 "org.springframework.http..", "org.springframework.web..", "jakarta.servlet..",
                 "org.springframework.security.web..", "org.springframework.security.config.annotation.web..",
+                "java.net.http..",
                 BASE + "..web.."
         ).check(productionClasses);
     }

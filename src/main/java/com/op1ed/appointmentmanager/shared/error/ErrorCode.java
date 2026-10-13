@@ -5,5 +5,8 @@ public enum ErrorCode {
     NOT_FOUND,
     CONFLICT,
     UNAUTHENTICATED,
-    FORBIDDEN
+    FORBIDDEN,
+    AGENT_UNAVAILABLE,
+    MODEL_ERROR,
+    MODEL_TIMEOUT
 }
