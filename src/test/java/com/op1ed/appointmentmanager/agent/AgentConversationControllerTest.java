@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -290,7 +291,7 @@ class AgentConversationControllerTest extends AgentApiFixtures {
         assertThat(failed.getBody().path("failureCode").asText()).isEqualTo("MODEL_TIMEOUT");
         assertThat(send(restTemplate, id, command).getBody()).isEqualTo(failed.getBody());
         verify(model, times(1)).complete(anyList(), anyList(), any());
-        when(model.complete(anyList(), anyList(), any())).thenReturn(textReply("恢复正常"));
+        doReturn(textReply("恢复正常")).when(model).complete(anyList(), anyList(), any());
         assertThat(send(restTemplate, id, command("新的请求")).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
