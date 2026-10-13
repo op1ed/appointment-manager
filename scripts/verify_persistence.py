@@ -18,14 +18,18 @@ from urllib.request import Request, urlopen
 
 BASE_URL = "http://127.0.0.1:8080"
 PROJECT_DIR = Path(__file__).resolve().parents[1]
+ACCESS_TOKEN = None
 
 
 def request_json(path, method="GET", body=None, expected_status=200):
     data = None if body is None else json.dumps(body).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if ACCESS_TOKEN is not None:
+        headers["Authorization"] = "Bearer " + ACCESS_TOKEN
     request = Request(
         BASE_URL + path,
         data=data,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=headers,
         method=method,
     )
 
@@ -48,7 +52,7 @@ def wait_until_ready():
 
     while time.monotonic() < deadline:
         try:
-            request_json("/api/appointments")
+            request_json("/api/doctors")
             return
         except (RuntimeError, URLError, OSError, ValueError) as error:
             last_error = error
@@ -57,6 +61,26 @@ def wait_until_ready():
     raise RuntimeError(
         "Application did not become ready within 120 seconds. "
         "Check it with: sudo docker compose logs --tail=100 app"
+    ) from last_error
+
+
+def wait_for_administrator_login(username, password):
+    # 首次启动时 HTTP 端口可能早于管理员初始化完成；等待初始化再验证登录。
+    deadline = time.monotonic() + 120
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            return request_json("/api/auth/login", method="POST", body={
+                "username": username, "password": password,
+            })
+        except RuntimeError as error:
+            if not isinstance(error.__cause__, HTTPError) or error.__cause__.code != 401:
+                raise
+            last_error = error
+            time.sleep(2)
+    raise RuntimeError(
+        "Administrator login failed. Check the bootstrap configuration and application logs. "
+        "Changing the bootstrap password does not reset an existing account's password."
     ) from last_error
 
 
@@ -79,14 +103,27 @@ def check_slot_availability(doctor_id, slot_id, expected):
 
 
 def main():
-    subprocess.run(
-        ["docker", "compose", "config", "--quiet"],
+    global ACCESS_TOKEN
+    compose = subprocess.run(
+        ["docker", "compose", "config", "--format", "json"],
         cwd=PROJECT_DIR,
         check=True,
+        capture_output=True,
+        text=True,
     )
+    environment = json.loads(compose.stdout)["services"]["app"]["environment"]
+    username = environment.get("APP_ADMIN_USERNAME")
+    password = environment.get("APP_ADMIN_PASSWORD")
+    if not username or not password:
+        raise RuntimeError("Configure the administrator with: python3 scripts/configure_admin.py")
 
     print("Waiting for the application...", flush=True)
     wait_until_ready()
+    login = wait_for_administrator_login(username, password)
+    ACCESS_TOKEN = login["accessToken"]
+    logged_in_user = request_json("/api/auth/me")
+    if logged_in_user.get("role") != "ADMIN":
+        raise RuntimeError("The deployment verification requires an administrator.")
 
     start_time = (
         datetime.now(timezone(timedelta(hours=8))) + timedelta(days=1)
@@ -172,6 +209,8 @@ def main():
     )
 
     wait_until_ready()
+    if request_json("/api/auth/me") != logged_in_user:
+        raise RuntimeError("The persisted login token stopped working after restarting the app.")
     after_restart = request_json(detail_path)
     if after_restart != before_restart:
         raise RuntimeError("The appointment changed after restarting the app.")

@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
+import com.op1ed.appointmentmanager.support.AuthenticatedApiTest;
 import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentPageResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.CreateAppointmentRequest;
@@ -29,22 +30,14 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(AppointmentControllerTest.HttpClientTestConfiguration.class)
-class AppointmentSearchControllerTest {
-
-    @Autowired
-    private TestRestTemplate restTemplate;
+class AppointmentSearchControllerTest extends AuthenticatedApiTest {
 
     @Autowired
     private ObjectMapper objectMapper;

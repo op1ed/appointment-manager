@@ -11,6 +11,7 @@ import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentRepository;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
+import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
@@ -37,9 +38,11 @@ public class SlotService {
 
     @Transactional
     public SlotResult create(
+            UserIdentity caller,
             long doctorId,
             CreateSlotCommand command
     ) {
+        UserIdentity.requireAuthenticated(caller).requireAdministrator();
         // 创建时段的第一条数据库查询：锁住对应医生。
         doctorService.lockForScheduling(doctorId);
 

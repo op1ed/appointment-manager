@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
+import com.op1ed.appointmentmanager.support.AuthenticatedApiTest;
 import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentPageResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.AppointmentResponse;
 import com.op1ed.appointmentmanager.appointment.web.dto.CreateAppointmentRequest;
@@ -31,12 +32,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.web.client.RestTemplateBuilderConfigurer;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.boot.web.client.RestTemplateBuilder;
-import org.springframework.context.annotation.Bean;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -46,11 +41,7 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AppointmentControllerTest {
-
-    @Autowired
-    private TestRestTemplate restTemplate;
+class AppointmentControllerTest extends AuthenticatedApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -617,16 +608,5 @@ class AppointmentControllerTest {
 
     private OffsetDateTime futureTime() {
         return OffsetDateTime.now(ZoneOffset.ofHours(8)).plusDays(1).withNano(0);
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class HttpClientTestConfiguration {
-
-        @Bean
-        RestTemplateBuilder restTemplateBuilder(RestTemplateBuilderConfigurer configurer) {
-            return configurer.configure(new RestTemplateBuilder())
-                    .connectTimeout(Duration.ofSeconds(5))
-                    .readTimeout(Duration.ofSeconds(15));
-        }
     }
 }

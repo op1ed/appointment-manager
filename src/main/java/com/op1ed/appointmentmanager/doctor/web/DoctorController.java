@@ -6,6 +6,7 @@ import java.util.List;
 import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,6 +19,7 @@ import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.doctor.web.dto.CreateDoctorRequest;
 import com.op1ed.appointmentmanager.doctor.web.dto.DoctorResponse;
+import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 
 @RestController
 @RequestMapping("/api/doctors")
@@ -31,9 +33,10 @@ public class DoctorController {
 
     @PostMapping
     public ResponseEntity<DoctorResponse> createDoctor(
+            @AuthenticationPrincipal UserIdentity caller,
             @Valid @RequestBody CreateDoctorRequest request
     ) {
-        DoctorInfo doctor = doctorService.create(new CreateDoctorCommand(request.name()));
+        DoctorInfo doctor = doctorService.create(caller, new CreateDoctorCommand(request.name()));
         URI location = URI.create("/api/doctors/" + doctor.id());
         return ResponseEntity.created(location).body(toResponse(doctor));
     }

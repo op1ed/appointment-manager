@@ -22,6 +22,9 @@ public class Appointment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "owner_id")
+    private Long ownerId;
+
     @Column(name = "slot_id")
     private Long slotId;
 
@@ -59,12 +62,28 @@ public class Appointment {
         this.endTime = endTime;
     }
 
+    public Appointment(
+            Long ownerId,
+            String customerName,
+            Long slotId,
+            String doctorName,
+            Instant startTime,
+            Instant endTime
+    ) {
+        this(customerName, slotId, doctorName, startTime, endTime);
+        this.ownerId = ownerId;
+    }
+
     public void cancel() {
         this.status = AppointmentStatus.CANCELLED;
     }
 
     public Long getId() {
         return id;
+    }
+
+    public Long getOwnerId() {
+        return ownerId;
     }
 
     public Long getSlotId() {

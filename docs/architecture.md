@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | `doctor` | 医生资料 | 创建、查询医生；为排班锁定医生记录 |
 | `appointment` | 排班时段、预约、取消、占用规则 | 发布时段、查询可用性、创建和取消预约 |
+| `identity` | 账号、密码校验、登录令牌与身份信息 | 注册、登录、验证令牌、退出、初始化管理员；提供 `UserIdentity` |
 | `shared` | 各模块共用的错误定义与 HTTP 错误转换 | 业务异常、统一错误响应 |
 
 `shared` 保持小范围，不承载医生或预约业务。以后接入 Agent 时再创建相应模块，由工具调用应用服务；当前没有空的 Agent 模块。
@@ -35,6 +36,14 @@ com.op1ed.appointmentmanager
 │   ├── domain
 │   └── infrastructure
 │       └── persistence
+├── identity
+│   ├── web
+│   │   └── security
+│   ├── application
+│   ├── domain
+│   └── infrastructure
+│       ├── persistence
+│       └── bootstrap
 └── shared
     ├── error
     └── web
@@ -54,6 +63,8 @@ com.op1ed.appointmentmanager
 应用服务负责资源存在、时段有效和占用情况等业务校验。HTTP 格式校验是入口的便利，业务规则仍要保护未来的 Agent 等调用入口。
 
 分页查询使用 `AppointmentQuery` 表达查询条件。`AppointmentService.search` 把筛选条件交给本模块 Repository，在数据库中分页和统计；再把查询结果转换为 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。HTTP 层不直接暴露 Spring Data 的 `Page`，也不把所有预约先加载到内存后分页。
+
+身份验证在 `identity.web.security` 适配器中完成：Spring Security 从 Bearer 令牌取得登录身份，Controller 收到普通 record `UserIdentity`，把它显式传给应用服务。应用服务不读取 `SecurityContextHolder`，也不依赖 HTTP 登录对象。身份模块内部验证账号和令牌，其他模块只使用其 `application` 入口。
 
 ### 当前分层的取舍
 
@@ -75,6 +86,8 @@ flowchart TD
     APP --> DOMAIN[预约与时段模型]
     APP --> REPO[预约模块 Repository]
     APP --> DOCTOR[医生应用服务]
+    HTTP --> IDENTITY[UserIdentity]
+    APP --> IDENTITY
     DOCTOR --> INFO[DoctorInfo]
     DOCTOR --> DREPO[医生模块 Repository]
     REPO --> MYSQL[(MySQL)]
@@ -92,7 +105,9 @@ flowchart TD
 4. `doctor` 不依赖 `appointment`，避免业务模块循环依赖。
 5. `domain` 不调用 Controller、应用服务或其他模块的 Repository。
 6. 业务代码使用 `shared.error` 中的业务异常，`shared.web` 把错误转换为 HTTP ProblemDetail。
-7. Agent 工具将来调用应用服务，共用规则与事务，不直接操作 Repository。
+7. `appointment` 和 `doctor` 只通过 `identity.application` 使用身份能力；身份模块不依赖预约或医生业务。
+8. 管理员初始化位于 `identity.infrastructure.bootstrap`，是调用应用服务的启动适配器；持久化 Repository 仍不依赖应用层。
+9. Agent 工具将来调用应用服务，共用规则、权限与事务，不直接操作 Repository。调用身份由服务端注入，不能由模型生成账号 ID 或管理员标记。
 
 架构测试用于检查这些边界，防止后续开发逐渐绕过约定。
 
@@ -109,12 +124,12 @@ flowchart TD
 
 创建预约的流程：
 
-1. Controller 对 HTTP 输入做格式校验，转成 `BookAppointmentCommand`。
+1. Spring Security 验证令牌。Controller 对 HTTP 输入做格式校验，转成 `BookAppointmentCommand`，连同登录身份传给服务。
 2. 预约应用服务开启事务，第一条数据库查询锁住目标时段。
 3. 检查时段存在且尚未开始。
 4. 通过医生应用服务取得医生信息。
 5. 检查该时段是否存在 `BOOKED` 预约。
-6. 创建预约，保存用户姓名、时段 ID、医生姓名与起止时间。
+6. 创建预约，保存登录账号的 `owner_id`、预约人姓名、时段 ID、医生姓名与起止时间。
 7. 保存并刷新数据，数据库唯一索引检查有效预约约束。
 8. 返回业务结果；事务提交后释放行锁，Controller 转换为响应。
 
@@ -127,6 +142,8 @@ flowchart TD
 取消只修改指定预约的状态。重新预约创建一条新记录，因此再次取消旧预约不会影响新预约。取消和预约使用同一时段的行锁协调操作。
 
 V3 以前的练习记录仍保留。它们的 `slot_id`、`end_time` 为空，可以查询和取消，但不占用新发布的时段。响应转换需要保留对空结束时间的处理。
+
+V4 之前的预约 `owner_id` 为空，只向管理员开放，普通用户不能按姓名认领它们。新预约归属来自登录账号，与填写的预约人姓名独立。
 
 ## 跨模块调用不能破坏事务
 
@@ -150,7 +167,7 @@ V3 以前的练习记录仍保留。它们的 `slot_id`、`end_time` 为空，�
 
 业务层使用业务异常表达非法输入、资源不存在或业务冲突，异常带稳定的 `code` 与中文说明。`INVALID_ARGUMENT`、`NOT_FOUND`、`CONFLICT` 分别表达这三类情况。它不抛 `ResponseStatusException`，也不选择 HTTP 状态码。
 
-统一异常处理将错误映射为 400、404 或 409，并返回 ProblemDetail。HTTP 校验或无法读取请求 JSON，也由 HTTP 层给出统一错误响应。
+统一异常处理将错误映射为 400、401、403、404 或 409，并返回 ProblemDetail。认证过滤器与权限处理器使用同样的错误结构；HTTP 校验或无法读取请求 JSON，也由 HTTP 层给出统一错误响应。
 
 创建、详情、取消等接口继续使用原有预约对象。预约列表接口现已升级为分页对象，结构为 `content`、`page`、`size`、`totalElements`、`totalPages`、`hasNext`，调用方需要从 `content` 读取记录。错误响应明确提供错误类型。以后 Agent 工具可以依据同一个业务错误判断如何回复、是否重新查询时段，而无需处理 HTTP 特有异常。
 
@@ -177,6 +194,8 @@ GET /api/appointments 的查询参数
 
 应用服务计算 `hasNext`，分页 Result 保留它以及总记录数、总页数等分页信息，Response 负责输出这些字段。只有当前页的预约记录需要转换为业务结果和响应对象。
 
+普通用户查询时，应用服务把登录账号 ID 作为强制归属条件传给 Repository，记录查询和 countQuery 都包含这个条件。管理员允许查询全部记录。详情与取消同样在数据库查询中限制归属，访问他人的 ID 与不存在的 ID 都返回 404；取消操作通过可见性检查后再锁住时段。
+
 ## 建议的阅读顺序
 
 1. 从预约 Controller 看输入输出，再看 `BookAppointmentCommand` 和 `AppointmentResult`，理解入口与业务的交接；对照列表接口的 [AppointmentQuery](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentQuery.java)、[AppointmentPageResult](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentPageResult.java) 与 [AppointmentPageResponse](../src/main/java/com/op1ed/appointmentmanager/appointment/web/dto/AppointmentPageResponse.java)，区分创建输入与查询输入。
@@ -188,4 +207,4 @@ GET /api/appointments 的查询参数
 7. 阅读 [统一异常处理](../src/main/java/com/op1ed/appointmentmanager/shared/web/GlobalExceptionHandler.java)，跟踪一个业务冲突如何变成 HTTP 响应。
 8. 最后阅读集成测试与架构测试，理解它们分别检查行为和依赖边界。
 
-先能解释创建、取消与分页查询的完整流程，再扩展用户身份和 Agent 工具。目录结构的价值是帮助维护这些规则，而不是让项目拥有更多文件夹。
+继续沿着 [身份与权限说明](identity-and-permissions.md) 阅读登录、请求认证和归属过滤，再扩展 Agent 工具。目录结构的价值是帮助维护这些规则，而不是让项目拥有更多文件夹。

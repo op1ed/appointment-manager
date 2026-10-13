@@ -3,7 +3,9 @@ package com.op1ed.appointmentmanager.shared.web;
 import jakarta.validation.ConstraintViolationException;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -18,13 +20,19 @@ import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    public ProblemDetail handleBusinessException(BusinessException exception) {
+    public ResponseEntity<ProblemDetail> handleBusinessException(BusinessException exception) {
         HttpStatus status = switch (exception.getCode()) {
             case INVALID_ARGUMENT -> HttpStatus.BAD_REQUEST;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case CONFLICT -> HttpStatus.CONFLICT;
+            case UNAUTHENTICATED -> HttpStatus.UNAUTHORIZED;
+            case FORBIDDEN -> HttpStatus.FORBIDDEN;
         };
-        return problem(status, exception.getMessage(), exception.getCode());
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(status);
+        if (status == HttpStatus.UNAUTHORIZED) {
+            response.header(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
+        }
+        return response.body(problem(status, exception.getMessage(), exception.getCode()));
     }
 
     @ExceptionHandler({

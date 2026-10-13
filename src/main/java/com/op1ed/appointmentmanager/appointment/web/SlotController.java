@@ -5,11 +5,13 @@ import java.util.List;
 import com.op1ed.appointmentmanager.appointment.application.SlotService;
 import com.op1ed.appointmentmanager.appointment.web.dto.CreateSlotRequest;
 import com.op1ed.appointmentmanager.appointment.web.dto.SlotResponse;
+import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,11 +31,12 @@ public class SlotController {
 
     @PostMapping
     public ResponseEntity<SlotResponse> createSlot(
+            @AuthenticationPrincipal UserIdentity caller,
             @PathVariable("doctorId") long doctorId,
             @Valid @RequestBody CreateSlotRequest request
     ) {
         SlotResponse slot = SlotResponse.from(
-                slotService.create(doctorId, request.toCommand())
+                slotService.create(caller, doctorId, request.toCommand())
         );
         return ResponseEntity.status(HttpStatus.CREATED).body(slot);
     }

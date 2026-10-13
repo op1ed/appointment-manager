@@ -10,6 +10,7 @@ import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.Appoi
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
+import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
@@ -38,7 +39,8 @@ public class AppointmentService {
     }
 
     @Transactional
-    public AppointmentResult create(BookAppointmentCommand command) {
+    public AppointmentResult create(UserIdentity caller, BookAppointmentCommand command) {
+        UserIdentity user = UserIdentity.requireAuthenticated(caller);
         // 创建预约的第一条数据库查询：锁住对应时段。
         AppointmentSlot slot = slotRepository
                 .findByIdForUpdate(command.slotId())
@@ -69,6 +71,7 @@ public class AppointmentService {
         }
 
         Appointment appointment = new Appointment(
+                user.id(),
                 command.customerName(),
                 slot.getId(),
                 doctor.name(),
@@ -80,11 +83,13 @@ public class AppointmentService {
         return toResult(saved);
     }
 
-    public AppointmentPageResult search(AppointmentQuery query) {
+    public AppointmentPageResult search(UserIdentity caller, AppointmentQuery query) {
+        UserIdentity user = UserIdentity.requireAuthenticated(caller);
         PageRequest pageable = PageRequest.of(
                 query.page(), query.size(), Sort.by(Sort.Direction.ASC, "id")
         );
         Page<AppointmentResult> page = appointmentRepository.search(
+                user.administrator() ? null : user.id(),
                 query.status(),
                 query.customerName(),
                 query.fromTime(),
@@ -104,14 +109,14 @@ public class AppointmentService {
         );
     }
 
-    public Optional<AppointmentResult> findById(long id) {
-        return appointmentRepository.findById(id)
+    public Optional<AppointmentResult> findById(UserIdentity caller, long id) {
+        return findVisible(UserIdentity.requireAuthenticated(caller), id)
                 .map(this::toResult);
     }
 
     @Transactional
-    public Optional<AppointmentResult> cancel(long id) {
-        return appointmentRepository.findById(id)
+    public Optional<AppointmentResult> cancel(UserIdentity caller, long id) {
+        return findVisible(UserIdentity.requireAuthenticated(caller), id)
                 .map(appointment -> {
                     if (appointment.getSlotId() != null) {
                         slotRepository
@@ -125,6 +130,13 @@ public class AppointmentService {
                     appointment.cancel();
                     return toResult(appointment);
                 });
+    }
+
+    private Optional<Appointment> findVisible(UserIdentity user, long id) {
+        // 在查询中限制归属；他人的记录与不存在的记录都返回相同的 404。
+        return user.administrator()
+                ? appointmentRepository.findById(id)
+                : appointmentRepository.findByIdAndOwnerId(id, user.id());
     }
 
     private AppointmentResult toResult(Appointment appointment) {

@@ -9,6 +9,7 @@ import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.Appoi
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
+import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
@@ -37,6 +38,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SlotServiceTest {
 
+    private static final UserIdentity ADMIN = new UserIdentity(1L, "admin", "Admin", true);
+
     @Mock
     private DoctorService doctorService;
 
@@ -56,7 +59,7 @@ class SlotServiceTest {
     @ParameterizedTest
     @MethodSource("invalidSlotInputs")
     void shouldRejectInvalidCommandBeforeAnyDatabaseAccess(Instant startTime, Instant endTime) {
-        assertThatThrownBy(() -> slotService.create(7L, new CreateSlotCommand(startTime, endTime)))
+        assertThatThrownBy(() -> slotService.create(ADMIN, 7L, new CreateSlotCommand(startTime, endTime)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
                 );
@@ -70,7 +73,7 @@ class SlotServiceTest {
         Instant startTime = Instant.now().minusSeconds(3600);
         CreateSlotCommand command = new CreateSlotCommand(startTime, startTime.plusSeconds(1800));
 
-        assertThatThrownBy(() -> slotService.create(7L, command))
+        assertThatThrownBy(() -> slotService.create(ADMIN, 7L, command))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
                 );
@@ -87,7 +90,7 @@ class SlotServiceTest {
                 7L, command.endTime(), command.startTime()
         )).thenReturn(true);
 
-        assertThatThrownBy(() -> slotService.create(7L, command))
+        assertThatThrownBy(() -> slotService.create(ADMIN, 7L, command))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.CONFLICT)
                 );
@@ -117,7 +120,7 @@ class SlotServiceTest {
             return slot;
         });
 
-        SlotResult result = slotService.create(7L, command);
+        SlotResult result = slotService.create(ADMIN, 7L, command);
 
         ArgumentCaptor<AppointmentSlot> savedSlot = ArgumentCaptor.forClass(AppointmentSlot.class);
         InOrder order = inOrder(doctorService, slotRepository);
@@ -141,6 +144,15 @@ class SlotServiceTest {
     private CreateSlotCommand futureCommand() {
         Instant startTime = Instant.now().plusSeconds(3600);
         return new CreateSlotCommand(startTime, startTime.plusSeconds(1800));
+    }
+
+    @Test
+    void shouldRejectNonAdministratorBeforeAnyDatabaseAccess() {
+        UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
+        assertThatThrownBy(() -> slotService.create(user, 7L, futureCommand()))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        verifyNoInteractions(doctorService, slotRepository, appointmentRepository);
     }
 
     private static Stream<Arguments> invalidSlotInputs() {

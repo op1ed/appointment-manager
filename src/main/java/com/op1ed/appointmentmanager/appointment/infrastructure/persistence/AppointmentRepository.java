@@ -2,6 +2,7 @@ package com.op1ed.appointmentmanager.appointment.infrastructure.persistence;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
@@ -14,6 +15,8 @@ import org.springframework.data.repository.query.Param;
 
 public interface AppointmentRepository
         extends JpaRepository<Appointment, Long> {
+
+    Optional<Appointment> findByIdAndOwnerId(Long id, Long ownerId);
 
     boolean existsBySlotIdAndStatus(
             Long slotId,
@@ -28,20 +31,23 @@ public interface AppointmentRepository
     @Query(
             value = """
                     select a from Appointment a
-                    where (:status is null or a.status = :status)
+                    where (:ownerId is null or a.ownerId = :ownerId)
+                      and (:status is null or a.status = :status)
                       and (:customerName is null or a.customerName = :customerName)
                       and (:fromTime is null or a.startTime >= :fromTime)
                       and (:toTime is null or a.startTime < :toTime)
                     """,
             countQuery = """
                     select count(a) from Appointment a
-                    where (:status is null or a.status = :status)
+                    where (:ownerId is null or a.ownerId = :ownerId)
+                      and (:status is null or a.status = :status)
                       and (:customerName is null or a.customerName = :customerName)
                       and (:fromTime is null or a.startTime >= :fromTime)
                       and (:toTime is null or a.startTime < :toTime)
                     """
     )
     Page<Appointment> search(
+            @Param("ownerId") Long ownerId,
             @Param("status") AppointmentStatus status,
             @Param("customerName") String customerName,
             @Param("fromTime") Instant fromTime,

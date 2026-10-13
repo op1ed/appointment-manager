@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.op1ed.appointmentmanager.doctor.domain.Doctor;
 import com.op1ed.appointmentmanager.doctor.infrastructure.persistence.DoctorRepository;
+import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.BusinessInputs;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
@@ -25,7 +26,8 @@ public class DoctorService {
     }
 
     @Transactional
-    public DoctorInfo create(CreateDoctorCommand command) {
+    public DoctorInfo create(UserIdentity caller, CreateDoctorCommand command) {
+        UserIdentity.requireAuthenticated(caller).requireAdministrator();
         Doctor doctor = new Doctor(command.name());
         return toInfo(doctorRepository.save(doctor));
     }

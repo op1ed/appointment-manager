@@ -13,6 +13,7 @@ import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.Appoi
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
+import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
@@ -47,6 +48,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AppointmentServiceTest {
 
+    private static final UserIdentity ADMIN = new UserIdentity(1L, "admin", "Admin", true);
+
     @Mock
     private AppointmentRepository appointmentRepository;
 
@@ -68,7 +71,7 @@ class AppointmentServiceTest {
     @ParameterizedTest
     @MethodSource("invalidBookingInputs")
     void shouldRejectInvalidCommandBeforeAnyDatabaseAccess(String customerName, Long slotId) {
-        assertThatThrownBy(() -> appointmentService.create(
+        assertThatThrownBy(() -> appointmentService.create(ADMIN,
                 new BookAppointmentCommand(customerName, slotId)
         )).isInstanceOfSatisfying(BusinessException.class, exception ->
                 assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
@@ -91,7 +94,7 @@ class AppointmentServiceTest {
                     return appointment;
                 });
 
-        AppointmentResult result = appointmentService.create(
+        AppointmentResult result = appointmentService.create(ADMIN,
                 new BookAppointmentCommand("  张三  ", 11L)
         );
 
@@ -114,7 +117,7 @@ class AppointmentServiceTest {
     void shouldStopWhenSlotDoesNotExist() {
         when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> appointmentService.create(new BookAppointmentCommand("张三", 11L)))
+        assertThatThrownBy(() -> appointmentService.create(ADMIN, new BookAppointmentCommand("张三", 11L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.NOT_FOUND)
                 );
@@ -130,7 +133,7 @@ class AppointmentServiceTest {
         ReflectionTestUtils.setField(slot, "id", 11L);
         when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(slot));
 
-        assertThatThrownBy(() -> appointmentService.create(new BookAppointmentCommand("张三", 11L)))
+        assertThatThrownBy(() -> appointmentService.create(ADMIN, new BookAppointmentCommand("张三", 11L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
                 );
@@ -147,7 +150,7 @@ class AppointmentServiceTest {
         when(appointmentRepository.existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED))
                 .thenReturn(true);
 
-        assertThatThrownBy(() -> appointmentService.create(new BookAppointmentCommand("张三", 11L)))
+        assertThatThrownBy(() -> appointmentService.create(ADMIN, new BookAppointmentCommand("张三", 11L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.CONFLICT)
                 );
@@ -165,7 +168,7 @@ class AppointmentServiceTest {
         when(doctorService.requireById(7L))
                 .thenThrow(new BusinessException(ErrorCode.NOT_FOUND, "医生不存在"));
 
-        assertThatThrownBy(() -> appointmentService.create(new BookAppointmentCommand("张三", 11L)))
+        assertThatThrownBy(() -> appointmentService.create(ADMIN, new BookAppointmentCommand("张三", 11L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.NOT_FOUND)
                 );
@@ -179,7 +182,7 @@ class AppointmentServiceTest {
     void shouldRejectInvalidSearchBeforeAnyDatabaseAccess(
             int page, int size, String customerName, Instant fromTime, Instant toTime
     ) {
-        assertThatThrownBy(() -> appointmentService.search(new AppointmentQuery(
+        assertThatThrownBy(() -> appointmentService.search(ADMIN, new AppointmentQuery(
                 page, size, null, customerName, fromTime, toTime
         ))).isInstanceOfSatisfying(BusinessException.class, exception ->
                 assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
@@ -205,15 +208,17 @@ class AppointmentServiceTest {
         ReflectionTestUtils.setField(current, "id", 22L);
         PageRequest repositoryPage = PageRequest.of(1, 2, Sort.by(Sort.Direction.ASC, "id"));
         when(appointmentRepository.search(
+                eq((Long) null),
                 eq(AppointmentStatus.BOOKED), eq("张三"),
                 eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
                 eq(toTime.truncatedTo(ChronoUnit.MICROS)), any(Pageable.class)
         )).thenReturn(new PageImpl<>(List.of(legacy, current), repositoryPage, 5L));
 
-        AppointmentPageResult result = appointmentService.search(query);
+        AppointmentPageResult result = appointmentService.search(ADMIN, query);
 
         ArgumentCaptor<Pageable> paging = ArgumentCaptor.forClass(Pageable.class);
         verify(appointmentRepository).search(
+                eq((Long) null),
                 eq(AppointmentStatus.BOOKED), eq("张三"),
                 eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
                 eq(toTime.truncatedTo(ChronoUnit.MICROS)), paging.capture()
@@ -238,6 +243,47 @@ class AppointmentServiceTest {
         AppointmentSlot slot = new AppointmentSlot(7L, startTime, startTime.plusSeconds(1800));
         ReflectionTestUtils.setField(slot, "id", 11L);
         return slot;
+    }
+
+    @Test
+    void shouldBindNewAppointmentToAuthenticatedAccount() {
+        UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
+        when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(futureSlot()));
+        when(doctorService.requireById(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
+        when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        appointmentService.create(user, new BookAppointmentCommand("代家人预约", 11L));
+        ArgumentCaptor<Appointment> saved = ArgumentCaptor.forClass(Appointment.class);
+        verify(appointmentRepository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getOwnerId()).isEqualTo(user.id());
+    }
+
+    @Test
+    void shouldRestrictNormalUserSearchBeforeDatabasePagination() {
+        UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
+        when(appointmentRepository.search(eq(31L), eq(null), eq(null), eq(null), eq(null), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0L));
+        AppointmentPageResult result = appointmentService.search(user, new AppointmentQuery(0, 20, null, null, null, null));
+        assertThat(result.content()).isEmpty();
+        verify(appointmentRepository).search(eq(31L), eq(null), eq(null), eq(null), eq(null), any(Pageable.class));
+        verifyNoInteractions(slotRepository, doctorService);
+    }
+
+    @Test
+    void shouldNotLockSlotOrModifyAppointmentForAnotherOwner() {
+        UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
+        when(appointmentRepository.findByIdAndOwnerId(21L, 31L)).thenReturn(Optional.empty());
+        assertThat(appointmentService.cancel(user, 21L)).isEmpty();
+        verify(appointmentRepository).findByIdAndOwnerId(21L, 31L);
+        verify(appointmentRepository, never()).findById(anyLong());
+        verifyNoInteractions(slotRepository, doctorService);
+    }
+
+    @Test
+    void shouldRejectMissingIdentityBeforeAnyDatabaseAccess() {
+        assertThatThrownBy(() -> appointmentService.create(null, new BookAppointmentCommand("用户", 11L)))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo(ErrorCode.UNAUTHENTICATED));
+        verifyNoInteractions(appointmentRepository, slotRepository, doctorService);
     }
 
     private static Stream<Arguments> invalidBookingInputs() {

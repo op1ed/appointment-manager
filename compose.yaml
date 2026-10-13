@@ -31,6 +31,8 @@ services:
       DB_URL: "jdbc:mysql://db:3306/appointment_manager?connectionTimeZone=UTC&useSSL=false&allowPublicKeyRetrieval=true"
       DB_USERNAME: appointment_app
       DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+      APP_ADMIN_USERNAME: "${ADMIN_USERNAME:-}"
+      APP_ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
     depends_on:
       db:
         condition: service_healthy
