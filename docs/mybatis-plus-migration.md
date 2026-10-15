@@ -1,44 +1,42 @@
 # 从熟悉的业务开始读 MyBatis-Plus
 
-项目已将医生、身份、预约、Agent 动作与会话、Graph 检查点的数据访问统一迁到 MyBatis-Plus 3.5.17。业务接口与表结构沿用原有设计，Flyway V1～V8 不变，服务器上的数据可以继续使用。
+项目已将医生、身份、预约、Agent 动作与会话、Graph 检查点的数据访问统一迁到 MyBatis-Plus 3.5.17。Service 直接调用 Mapper，已移除额外的 Repository 封装。业务接口与表结构沿用原有设计，Flyway V1～V8 不变，服务器上的数据可以继续使用。
 
 ## 先看调用链
 
 ```text
 DoctorController
   → DoctorService                 组织业务规则与事务
-  → DoctorRepository              本模块的数据访问入口
   → DoctorMapper / BaseMapper     执行 SQL、映射查询结果
   → MySQL
 ```
 
-`Repository` 是我们编写的普通类，负责组织本模块的数据访问；`Mapper` 是交给 MyBatis 实现的接口。Spring 启动时，`MybatisConfiguration` 扫描带 `@Mapper` 的接口，为它们创建代理对象，并注入 Repository。调用代理的方法时，框架执行对应 SQL。
+`Service` 是我们编写的业务类，负责校验、组织操作和事务；`Mapper` 是交给 MyBatis 实现的接口。Spring 启动时，`MybatisConfiguration` 扫描带 `@Mapper` 的接口，为它们创建代理对象，并注入 Service。调用代理的方法时，框架执行对应 SQL。
 
-保留 Repository 是为了让业务服务不用知道分页插件、通用 Mapper 和具体 SQL 的用法。这里只有一个 Maven 工程，各模块仍按业务分包。
+通用读写直接使用 `BaseMapper`，筛选和行锁等查询在本模块 Mapper 上声明 SQL。只有一个 Maven 工程，各模块仍按业务分包；预约模块使用医生能力时调用 `DoctorService`，不会直接查询医生表。
 
 ## 第一段：回看医生查询和创建
 
 依次读：
 
 1. [Doctor](../src/main/java/com/op1ed/appointmentmanager/doctor/domain/Doctor.java)
-2. [MybatisRepository](../src/main/java/com/op1ed/appointmentmanager/shared/persistence/MybatisRepository.java)
-3. [DoctorMapper](../src/main/java/com/op1ed/appointmentmanager/doctor/infrastructure/persistence/mapper/DoctorMapper.java)
-4. [DoctorRepository](../src/main/java/com/op1ed/appointmentmanager/doctor/infrastructure/persistence/DoctorRepository.java)
-5. 回到 [DoctorService](../src/main/java/com/op1ed/appointmentmanager/doctor/application/DoctorService.java)
+2. [DoctorMapper](../src/main/java/com/op1ed/appointmentmanager/doctor/infrastructure/persistence/mapper/DoctorMapper.java)
+3. [DoctorService](../src/main/java/com/op1ed/appointmentmanager/doctor/application/DoctorService.java)
+4. [MybatisConfiguration](../src/main/java/com/op1ed/appointmentmanager/shared/persistence/MybatisConfiguration.java)
 
 `@TableName("doctors")` 指明表名；`@TableId(type = IdType.AUTO)` 让 MySQL 生成自增主键，插入成功后回填 `id`。字段名默认使用驼峰转下划线，例如 `passwordHash` 对应 `password_hash`。UUID 字符串主键使用 `IdType.INPUT`，由业务创建对象时提供。
 
 `DoctorMapper extends BaseMapper<Doctor>` 表示它继承 MyBatis-Plus 提供的通用方法。例如 `insert` 插入医生，`selectById` 按主键查询，`updateById` 按主键更新。框架根据表与字段映射生成这些 SQL。
 
-项目的 `MybatisRepository.save` 调用 `insert`，`findById` 调用 `selectById`；DoctorRepository 继承它们。所以查询医生编号 7 时，沿着 `findById(7)` 最终会执行按主键查询 doctors 表的 SQL。
+`DoctorService.create` 创建 Doctor 后调用 `doctorMapper.insert(doctor)`。这个方法返回影响行数，医生对象的 `id` 由框架回填，随后将 doctor 转为 DoctorInfo 返回。按编号查询时，Service 调用 `doctorMapper.selectById(id)`；不存在时返回 null，Service 用 `Optional.ofNullable` 转为“可能不存在”的业务结果。
 
-医生的列表、姓名筛选、锁定查询使用 Mapper 上明确声明的 `@Select`。这里的方法名不会自动生成查询；`findByNameContaining` 的具体行为由 Repository 与 Mapper 里的代码决定。姓名中的 `%`、`_` 被转义，继续表示普通字符。
+医生的列表、姓名筛选、锁定查询使用 Mapper 上明确声明的 `@Select`。自定义方法名不会自动生成查询：`listOrdered`、`search`、`lockById` 的 SQL 都在 Mapper 中。Service 将姓名整理为 LIKE 查询参数，其中 `%`、`_` 被转义，继续表示普通字符。
 
 `#{id}`、`#{pattern}` 是绑定参数。框架用预编译参数传值，用户输入不会作为 SQL 结构拼接。
 
 ## 第二段：回看账号注册
 
-从 [IdentityService.register](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java) 往下读 [UserAccountRepository](../src/main/java/com/op1ed/appointmentmanager/identity/infrastructure/persistence/UserAccountRepository.java) 和 [UserAccountMapper](../src/main/java/com/op1ed/appointmentmanager/identity/infrastructure/persistence/mapper/UserAccountMapper.java)。
+从 [IdentityService.register](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java) 往下读 [UserAccountMapper](../src/main/java/com/op1ed/appointmentmanager/identity/infrastructure/persistence/mapper/UserAccountMapper.java)。
 
 注册的业务流程仍是：整理参数 → 检查用户名 → BCrypt 散列密码 → INSERT 账号 → 返回账号资料。登录继续使用 `PasswordEncoder.matches`，数据库访问框架不改变密码存储方式。
 
@@ -48,13 +46,13 @@ DoctorController
 
 | 操作 | 当前项目的写法 | 需要理解的行为 |
 | --- | --- | --- |
-| 新增 | `repository.save(newEntity)` | 立即 INSERT，数据库生成的主键回填到对象 |
-| 查询 | `repository.findById(id)` | 执行查询，组装普通 Java 对象 |
+| 新增 | `mapper.insert(newEntity)` | 返回影响行数，数据库生成的主键回填到传入对象 |
+| 查询 | `mapper.selectById(id)` | 执行查询，返回普通 Java 对象或 null |
 | 修改对象 | `appointment.cancel()` | 只改变内存里的对象 |
-| 保存修改 | `repository.update(appointment)` | 显式调用 `updateById` 执行 UPDATE |
+| 保存修改 | `mapper.updateById(appointment)` | 显式执行 UPDATE，返回影响行数 |
 | 一组操作共同提交 | 应用服务上的 `@Transactional` | SQL 即使已经执行，事务回滚仍能撤销其数据库变更 |
 
-这里的 `save` 是项目自定义的“新增”入口，不表示自动判断新增还是更新。修改已有对象时用 `update`，不再依赖 JPA 的脏检查，也没有 `flush` 步骤。
+新增与修改分别调用 `insert`、`updateById`，不再依赖 JPA 的脏检查，也没有 `flush` 步骤。Service 用 `PersistenceChecks.requireUpdatedRow(mapper.updateById(entity))` 检查更新结果：已锁定的记录应更新一行，否则抛异常，让同一事务中的其他变更一起回滚。这个工具只检查整数结果，不持有 Mapper，也不执行 SQL。
 
 目前更新入口接收从数据库完整读取的实体。配置 `update-strategy=always` 使可空字段设为 `null` 时也能写回数据库；不要把只有部分字段的 HTTP 请求对象当成完整实体更新，否则其他列会被清空。Controller 的 DTO 与领域对象仍然分开。
 
@@ -62,7 +60,7 @@ DoctorController
 
 ## 分页、锁与时间怎么保留
 
-**分页**：应用与 HTTP 页号仍从 0 开始，`StoragePage.request` 转为 MyBatis-Plus 从 1 开始的页号；返回结果再转回 0。分页拦截器执行 count 与 LIMIT 查询，筛选条件和排序写在 Mapper 中。当前关闭 count SQL 的结构优化，使用完整筛选查询统计总数。业务层使用 `StoragePage`，HTTP 响应结构保持原样。
+**分页**：应用与 HTTP 页号仍从 0 开始，Service 用 `StoragePage.request` 转为 MyBatis-Plus 从 1 开始的页号并传给 Mapper；`StoragePage.from` 把查询结果转回从 0 开始的页号。分页拦截器执行 count 与 LIMIT 查询，筛选条件和排序写在 Mapper 中。当前关闭 count SQL 的结构优化，使用完整筛选查询统计总数。`StoragePage` 是分页数据转换工具，HTTP 响应结构保持原样。
 
 **行锁**：`DoctorMapper.lockById`、预约与时段的锁定查询直接执行 `SELECT ... FOR UPDATE`。锁必须在同一个 Spring 事务内持有，事务提交或回滚后释放。原有的医生排班锁、预约锁、时段按 ID 升序加锁规则不变。`local-cache-scope=STATEMENT` 避免后续 SQL 复用一级缓存对象，但数据库的隔离级别和查询顺序仍决定并发可见性。
 

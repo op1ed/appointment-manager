@@ -9,9 +9,9 @@ import com.op1ed.appointmentmanager.appointment.domain.AppointmentAction;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentEvent;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentEventRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentEventMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
@@ -43,10 +43,10 @@ class AppointmentRescheduleServiceTest {
     private static final UserIdentity USER = new UserIdentity(31L, "alice", "Alice", false);
     private static final UserIdentity ADMIN = new UserIdentity(1L, "admin", "Admin", true);
 
-    @Mock private AppointmentRepository appointments;
-    @Mock private AppointmentSlotRepository slots;
+    @Mock private AppointmentMapper appointments;
+    @Mock private AppointmentSlotMapper slots;
     @Mock private DoctorService doctors;
-    @Mock private AppointmentEventRepository events;
+    @Mock private AppointmentEventMapper events;
     private AppointmentService service;
 
     @BeforeEach
@@ -60,22 +60,23 @@ class AppointmentRescheduleServiceTest {
         Appointment appointment = appointment(originalId);
         AppointmentSlot original = slot(originalId);
         AppointmentSlot target = slot(targetId);
-        when(appointments.findVisibleByIdForUpdate(21L, USER.id())).thenReturn(Optional.of(appointment));
-        when(slots.findByIdForUpdate(originalId)).thenReturn(Optional.of(original));
-        when(slots.findByIdForUpdate(targetId)).thenReturn(Optional.of(target));
+        when(appointments.lockVisible(21L, USER.id())).thenReturn(Optional.of(appointment));
+        when(slots.lockById(originalId)).thenReturn(Optional.of(original));
+        when(slots.lockById(targetId)).thenReturn(Optional.of(target));
         when(doctors.requireById(7L)).thenReturn(new DoctorInfo(7L, "新医生"));
+        when(appointments.updateById(appointment)).thenReturn(1);
 
         var result = service.reschedule(USER, 21L, new RescheduleAppointmentCommand(originalId, targetId)).orElseThrow();
 
         var order = inOrder(appointments, slots, doctors, events);
-        order.verify(appointments).findVisibleByIdForUpdate(21L, USER.id());
-        order.verify(slots).findByIdForUpdate(Math.min(originalId, targetId));
-        order.verify(slots).findByIdForUpdate(Math.max(originalId, targetId));
+        order.verify(appointments).lockVisible(21L, USER.id());
+        order.verify(slots).lockById(Math.min(originalId, targetId));
+        order.verify(slots).lockById(Math.max(originalId, targetId));
         order.verify(doctors).requireById(7L);
-        order.verify(appointments).existsBySlotIdAndStatus(targetId, AppointmentStatus.BOOKED);
-        order.verify(appointments).update(appointment);
+        order.verify(appointments).existsOccupied(targetId, AppointmentStatus.BOOKED);
+        order.verify(appointments).updateById(appointment);
         ArgumentCaptor<AppointmentEvent> event = ArgumentCaptor.forClass(AppointmentEvent.class);
-        order.verify(events).save(event.capture());
+        order.verify(events).insert(event.capture());
         assertThat(result.id()).isEqualTo(21L);
         assertThat(result.slotId()).isEqualTo(targetId);
         assertThat(result.doctorName()).isEqualTo("新医生");
@@ -90,24 +91,24 @@ class AppointmentRescheduleServiceTest {
     void shouldApplyOwnershipBeforeLookingUpTargetSlotOrHistory() {
         assertThat(service.reschedule(USER, 21L, new RescheduleAppointmentCommand(11L, 12L))).isEmpty();
         assertThat(service.history(USER, 21L, new AppointmentHistoryQuery(0, 20))).isEmpty();
-        verify(appointments).findVisibleByIdForUpdate(21L, USER.id());
-        verify(appointments).findByIdAndOwnerId(21L, USER.id());
+        verify(appointments).lockVisible(21L, USER.id());
+        verify(appointments).findOwned(21L, USER.id());
         verifyNoInteractions(slots, doctors, events);
     }
 
     @Test
     void shouldTreatRetryAtTargetAsNoChangeWithoutAnotherEvent() {
         Appointment appointment = appointment(12L);
-        when(appointments.findVisibleByIdForUpdate(21L, USER.id())).thenReturn(Optional.of(appointment));
+        when(appointments.lockVisible(21L, USER.id())).thenReturn(Optional.of(appointment));
         assertThat(service.reschedule(USER, 21L, new RescheduleAppointmentCommand(11L, 12L))
                 .orElseThrow().slotId()).isEqualTo(12L);
         verifyNoInteractions(slots, doctors, events);
-        verify(appointments, never()).update(any(Appointment.class));
+        verify(appointments, never()).updateById(any(Appointment.class));
     }
 
     @Test
     void shouldRejectStaleExpectedSlotBeforeLockingSlots() {
-        when(appointments.findVisibleByIdForUpdate(21L, USER.id())).thenReturn(Optional.of(appointment(12L)));
+        when(appointments.lockVisible(21L, USER.id())).thenReturn(Optional.of(appointment(12L)));
         assertConflict(() -> service.reschedule(USER, 21L, new RescheduleAppointmentCommand(11L, 13L)));
         verifyNoInteractions(slots, doctors, events);
     }
@@ -116,9 +117,9 @@ class AppointmentRescheduleServiceTest {
     void shouldRejectCancelledOrLegacyAppointmentsBeforeLookingUpTarget() {
         Appointment cancelled = appointment(11L);
         cancelled.cancel();
-        when(appointments.findVisibleByIdForUpdate(21L, USER.id())).thenReturn(Optional.of(cancelled));
+        when(appointments.lockVisible(21L, USER.id())).thenReturn(Optional.of(cancelled));
         assertConflict(() -> service.reschedule(USER, 21L, new RescheduleAppointmentCommand(11L, 12L)));
-        when(appointments.findVisibleByIdForUpdate(21L, USER.id())).thenReturn(Optional.of(appointment(null)));
+        when(appointments.lockVisible(21L, USER.id())).thenReturn(Optional.of(appointment(null)));
         assertConflict(() -> service.reschedule(USER, 21L, new RescheduleAppointmentCommand(11L, 12L)));
         verifyNoInteractions(slots, doctors, events);
     }
@@ -127,10 +128,10 @@ class AppointmentRescheduleServiceTest {
     void shouldNotDuplicateCancellationEventOrLockRebookedSlot() {
         Appointment cancelled = appointment(11L);
         cancelled.cancel();
-        when(appointments.findVisibleByIdForUpdate(21L, null)).thenReturn(Optional.of(cancelled));
+        when(appointments.lockVisible(21L, null)).thenReturn(Optional.of(cancelled));
         assertThat(service.cancel(ADMIN, 21L).orElseThrow().status()).isEqualTo(AppointmentStatus.CANCELLED);
         verifyNoInteractions(slots, doctors, events);
-        verify(appointments, never()).update(any(Appointment.class));
+        verify(appointments, never()).updateById(any(Appointment.class));
     }
 
     @ParameterizedTest

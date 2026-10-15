@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.op1ed.appointmentmanager.agent.application.AgentActionService;
 import com.op1ed.appointmentmanager.agent.application.workflow.*;
-import com.op1ed.appointmentmanager.agent.infrastructure.persistence.*;
+import com.op1ed.appointmentmanager.agent.infrastructure.persistence.mapper.*;
 import com.op1ed.appointmentmanager.agent.infrastructure.springai.MybatisWorkflowCheckpointSaver;
 import com.op1ed.appointmentmanager.agent.infrastructure.springai.SpringAiReschedulingGraph;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
@@ -33,8 +33,8 @@ class ReschedulingWorkflowControllerTest extends AgentApiFixtures {
     @Autowired private MybatisWorkflowCheckpointSaver saver;
     @Autowired private ReschedulingWorkflowOperations operations;
     @Autowired private WorkflowJson workflowJson;
-    @Autowired private ReschedulingWorkflowRepository workflows;
-    @Autowired private WorkflowRequestRepository requests;
+    @Autowired private ReschedulingWorkflowMapper workflows;
+    @Autowired private WorkflowRequestMapper requests;
     @Autowired private AgentActionService actions;
     @Autowired private PlatformTransactionManager transactionManager;
 
@@ -295,6 +295,6 @@ class ReschedulingWorkflowControllerTest extends AgentApiFixtures {
         assertThat(step(owner.client(), current, "confirm").path("status").asText()).isEqualTo("COMPLETED");
     }
 
-    @Autowired private WorkflowCheckpointRepository checkpointRepository;
-    private WorkflowCheckpointRepository checkpoints() { return checkpointRepository; }
+    @Autowired private WorkflowCheckpointMapper checkpointMapper;
+    private WorkflowCheckpointMapper checkpoints() { return checkpointMapper; }
 }

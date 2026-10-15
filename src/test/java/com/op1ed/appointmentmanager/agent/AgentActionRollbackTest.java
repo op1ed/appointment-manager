@@ -1,6 +1,6 @@
 package com.op1ed.appointmentmanager.agent;
 
-import com.op1ed.appointmentmanager.agent.infrastructure.persistence.AgentActionRepository;
+import com.op1ed.appointmentmanager.agent.infrastructure.persistence.mapper.AgentActionMapper;
 import com.op1ed.appointmentmanager.agent.domain.AgentAction;
 import com.op1ed.appointmentmanager.support.AgentApiFixtures;
 
@@ -13,14 +13,14 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.any;
 
 class AgentActionRollbackTest extends AgentApiFixtures {
-    @MockitoSpyBean private AgentActionRepository actions;
+    @MockitoSpyBean private AgentActionMapper actions;
 
     @Test
-    void shouldRollBackAppointmentAndEventIfConfirmedResultCannotBeFlushed() {
+    void shouldRollBackAppointmentAndEventIfConfirmedResultCannotBeUpdated() {
         var slot = createSlots(1).get(0);
         var action = prepareBooking(restTemplate, slot.id());
         // 预约和操作记录已执行 INSERT；模拟保存确认结果的 UPDATE 失败，验证整个事务回滚。
-        doThrow(new IllegalStateException("Simulated action result storage failure")).when(actions).update(any(AgentAction.class));
+        doThrow(new IllegalStateException("Simulated action result storage failure")).when(actions).updateById(any(AgentAction.class));
         assertThat(confirm(restTemplate, action).getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(db.queryForObject("SELECT COUNT(*) FROM appointments WHERE slot_id = ?", Long.class, slot.id())).isZero();
         assertThat(db.queryForObject("SELECT COUNT(*) FROM appointment_events WHERE to_slot_id = ?", Long.class, slot.id())).isZero();

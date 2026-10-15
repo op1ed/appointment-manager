@@ -8,7 +8,7 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** Repository 组织数据访问，标注 @Mapper 的接口由 MyBatis 实现并执行 SQL。 */
+/** Service 直接调用 Mapper；标注 @Mapper 的接口由 MyBatis 实现并执行 SQL。 */
 @Configuration(proxyBeanMethods = false)
 @MapperScan(basePackages = "com.op1ed.appointmentmanager", annotationClass = Mapper.class)
 public class MybatisConfiguration {

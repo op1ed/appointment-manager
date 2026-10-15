@@ -2,7 +2,7 @@
 
 本轮解决两个问题：请求来自哪个账号，以及这个账号能操作哪些记录。预约人姓名仍是业务资料，不能作为登录身份或权限依据。
 
-数据库访问现已改为 MyBatis-Plus。身份业务规则不变，`IdentityService` 通过本模块 Repository 调用 Mapper；新增账号和令牌立即执行 INSERT。可结合 [MyBatis-Plus 阅读说明](mybatis-plus-migration.md) 从熟悉的注册流程向下追踪。
+数据库访问现已改为 MyBatis-Plus。身份业务规则不变，`IdentityService` 直接调用本模块 Mapper；新增账号和令牌立即执行 INSERT。可结合 [MyBatis-Plus 阅读说明](mybatis-plus-migration.md) 从熟悉的注册流程向下追踪。
 
 ## 本批阅读：3A，注册与登录
 
@@ -85,7 +85,7 @@ Controller 用 `@AuthenticationPrincipal` 取得 `UserIdentity`，再显式传�
 
 创建预约从已认证的身份取得 `owner_id`。请求的 `customerName` 可表示家人姓名，但不能改变归属；客户端提交 `ownerId` 或 `administrator` 不会改变服务器的决定。
 
-普通用户分页查询时，Repository 的记录查询和 countQuery 都强制包含 `owner_id = 当前账号`。在数据库分页前完成过滤，避免当前页或总数泄漏其他用户信息。详情和取消使用 `findByIdAndOwnerId`，他人的 ID 与不存在的 ID 都返回相同的 404。
+普通用户分页查询时，Mapper 的记录查询和 count SQL 都强制包含 `owner_id = 当前账号`。在数据库分页前完成过滤，避免当前页或总数泄漏其他用户信息。详情使用 `findOwned`，取消与改期使用带锁的 `lockVisible`，他人的 ID 与不存在的 ID 都返回相同的 404。
 
 历史预约保留，V4 之前没有 owner_id 的记录只能由管理员查看和取消。系统不按同名自动归属历史记录。
 
@@ -102,7 +102,7 @@ Controller 用 `@AuthenticationPrincipal` 取得 `UserIdentity`，再显式传�
 1. [UserIdentity](../src/main/java/com/op1ed/appointmentmanager/identity/application/UserIdentity.java)：业务层需要的身份信息与管理员检查。
 2. [IdentityService](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java)：注册、密码校验、令牌验证和退出。
 3. [SecurityConfiguration](../src/main/java/com/op1ed/appointmentmanager/identity/web/security/SecurityConfiguration.java) 与 [BearerTokenFilter](../src/main/java/com/op1ed/appointmentmanager/identity/web/security/BearerTokenFilter.java)：接口权限和请求身份。
-4. [AppointmentService](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java) 与 [AppointmentRepository](../src/main/java/com/op1ed/appointmentmanager/appointment/infrastructure/persistence/AppointmentRepository.java)：归属如何参与记录与总数查询。
+4. [AppointmentService](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java) 与 [AppointmentMapper](../src/main/java/com/op1ed/appointmentmanager/appointment/infrastructure/persistence/mapper/AppointmentMapper.java)：归属如何参与记录与总数查询。
 5. [V4 迁移](../src/main/resources/db/migration/V4__add_accounts_tokens_and_appointment_owners.sql)：账号、令牌、外键和归属索引。
 6. [权限集成测试](../src/test/java/com/op1ed/appointmentmanager/identity/AuthAndOwnershipControllerTest.java)：同名隔离、伪造字段、401/403/404、过期和撤销、并发注册。
 

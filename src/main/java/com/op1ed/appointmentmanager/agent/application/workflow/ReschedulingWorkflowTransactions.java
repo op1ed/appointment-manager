@@ -10,8 +10,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.op1ed.appointmentmanager.agent.application.AgentActionService;
 import com.op1ed.appointmentmanager.agent.domain.ReschedulingWorkflow;
 import com.op1ed.appointmentmanager.agent.domain.WorkflowRequest;
-import com.op1ed.appointmentmanager.agent.infrastructure.persistence.ReschedulingWorkflowRepository;
-import com.op1ed.appointmentmanager.agent.infrastructure.persistence.WorkflowRequestRepository;
+import com.op1ed.appointmentmanager.agent.infrastructure.persistence.mapper.ReschedulingWorkflowMapper;
+import com.op1ed.appointmentmanager.agent.infrastructure.persistence.mapper.WorkflowRequestMapper;
 import com.op1ed.appointmentmanager.appointment.application.SlotResult;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
@@ -21,17 +21,18 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 
 import static com.op1ed.appointmentmanager.agent.application.workflow.WorkflowJson.*;
+import static com.op1ed.appointmentmanager.shared.persistence.PersistenceChecks.requireUpdatedRow;
 
 /** 每次 Graph 推进都是短事务，检查点、动作、预约变更和响应日志一起提交。 */
 @Service
 public class ReschedulingWorkflowTransactions {
-    private final ReschedulingWorkflowRepository workflows;
-    private final WorkflowRequestRepository requests;
+    private final ReschedulingWorkflowMapper workflows;
+    private final WorkflowRequestMapper requests;
     private final ReschedulingGraph graph;
     private final ReschedulingWorkflowOperations operations;
     private final AgentActionService actions;
     private final WorkflowJson json;
-    public ReschedulingWorkflowTransactions(ReschedulingWorkflowRepository workflows, WorkflowRequestRepository requests,
+    public ReschedulingWorkflowTransactions(ReschedulingWorkflowMapper workflows, WorkflowRequestMapper requests,
             ReschedulingGraph graph, ReschedulingWorkflowOperations operations, AgentActionService actions, WorkflowJson json) {
         this.workflows = workflows; this.requests = requests; this.graph = graph;
         this.operations = operations; this.actions = actions; this.json = json;
@@ -42,8 +43,9 @@ public class ReschedulingWorkflowTransactions {
         var previous = replay(user, command.requestId(), null, "START", command);
         if (previous.isPresent()) { return previous.get(); }
         operations.validateStart(user, command);
-        var workflow = workflows.save(new ReschedulingWorkflow(UUID.randomUUID().toString(), user.id(),
-                command.appointmentId(), Instant.now()));
+        var workflow = new ReschedulingWorkflow(UUID.randomUUID().toString(), user.id(),
+                command.appointmentId(), Instant.now());
+        workflows.insert(workflow);
         return store(user, workflow, command.requestId(), "START", command, graph.start(user, workflow.getId(), command));
     }
 
@@ -91,21 +93,21 @@ public class ReschedulingWorkflowTransactions {
 
     @Transactional(readOnly = true)
     public ReschedulingWorkflowView find(UserIdentity user, String id) {
-        return view(user, workflows.findByIdAndOwnerId(id, user.id()).orElseThrow(this::notFound));
+        return view(user, workflows.findOwned(id, user.id()).orElseThrow(this::notFound));
     }
 
     private ReschedulingWorkflowView store(UserIdentity user, ReschedulingWorkflow workflow, String requestId,
             String kind, Object command, ReschedulingGraph.GraphResult result) {
         workflow.advance(result.stateJson(), result.status(), result.nextNode(), Instant.now());
-        workflows.update(workflow);
+        requireUpdatedRow(workflows.updateById(workflow));
         var response = view(user, workflow);
-        requests.save(new WorkflowRequest(user.id(), requestId, workflow.getId(), kind, json.write(command), json.write(response)));
+        requests.insert(new WorkflowRequest(user.id(), requestId, workflow.getId(), kind, json.write(command), json.write(response)));
         return response;
     }
 
     private Optional<ReschedulingWorkflowView> replay(UserIdentity user, String requestId, String workflowId,
             String kind, Object command) {
-        return requests.findByOwnerIdAndRequestId(user.id(), requestId).map(previous -> {
+        return requests.findRequest(user.id(), requestId).map(previous -> {
             if (!previous.getKind().equals(kind) || workflowId != null && !workflowId.equals(previous.getWorkflowId())
                     || !json.read(previous.getPayloadJson(), JsonNode.class).equals(json.read(json.write(command), JsonNode.class))) {
                 throw new BusinessException(ErrorCode.CONFLICT, "此请求 ID 已用于其他流程或参数");

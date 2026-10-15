@@ -7,8 +7,8 @@ import java.util.Optional;
 import com.op1ed.appointmentmanager.identity.domain.AccessToken;
 import com.op1ed.appointmentmanager.identity.domain.AccountRole;
 import com.op1ed.appointmentmanager.identity.domain.UserAccount;
-import com.op1ed.appointmentmanager.identity.infrastructure.persistence.AccessTokenRepository;
-import com.op1ed.appointmentmanager.identity.infrastructure.persistence.UserAccountRepository;
+import com.op1ed.appointmentmanager.identity.infrastructure.persistence.mapper.AccessTokenMapper;
+import com.op1ed.appointmentmanager.identity.infrastructure.persistence.mapper.UserAccountMapper;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
@@ -28,14 +28,14 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class IdentityServiceTest {
-    private UserAccountRepository accounts;
-    private AccessTokenRepository tokens;
+    private UserAccountMapper accounts;
+    private AccessTokenMapper tokens;
     private IdentityService service;
 
     @BeforeEach
     void setUp() {
-        accounts = mock(UserAccountRepository.class);
-        tokens = mock(AccessTokenRepository.class);
+        accounts = mock(UserAccountMapper.class);
+        tokens = mock(AccessTokenMapper.class);
         service = new IdentityService(accounts, tokens, new BCryptPasswordEncoder(), Duration.ofHours(24));
     }
 

@@ -10,7 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.op1ed.appointmentmanager.agent.domain.AgentAction;
 import com.op1ed.appointmentmanager.agent.domain.AgentActionKind;
 import com.op1ed.appointmentmanager.agent.domain.AgentActionStatus;
-import com.op1ed.appointmentmanager.agent.infrastructure.persistence.AgentActionRepository;
+import com.op1ed.appointmentmanager.agent.infrastructure.persistence.mapper.AgentActionMapper;
 import com.op1ed.appointmentmanager.appointment.application.AppointmentResult;
 import com.op1ed.appointmentmanager.appointment.application.AppointmentService;
 import com.op1ed.appointmentmanager.appointment.application.BookAppointmentCommand;
@@ -28,17 +28,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
 
+import static com.op1ed.appointmentmanager.shared.persistence.PersistenceChecks.requireUpdatedRow;
+
 @Service
 @Transactional(readOnly = true)
 public class AgentActionService {
-    private final AgentActionRepository actions;
+    private final AgentActionMapper actions;
     private final AppointmentService appointments;
     private final SlotService slots;
     private final DoctorService doctors;
     private final ObjectMapper json;
     private final Duration actionTtl;
 
-    public AgentActionService(AgentActionRepository actions, AppointmentService appointments, SlotService slots,
+    public AgentActionService(AgentActionMapper actions, AppointmentService appointments, SlotService slots,
             DoctorService doctors, ObjectMapper json, @Value("${app.agent.action-ttl:PT5M}") Duration actionTtl) {
         if (actionTtl.isNegative() || actionTtl.isZero() || actionTtl.toMillis() < 1) {
             throw new IllegalArgumentException("动作有效期至少为 1 毫秒");
@@ -101,19 +103,20 @@ public class AgentActionService {
                         "将以下预约改到新的医生和时段，确认前原预约保持不变", original,
                         proposal(original.customerName(), target))), created, created.plus(actionTtl));
         if (workflowId != null) { action.assignWorkflow(workflowId); }
-        return toResult(actions.save(action));
+        actions.insert(action);
+        return toResult(action);
     }
 
     public AgentActionResult find(UserIdentity caller, String id) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
-        return toResult(actions.findByIdAndOwnerId(requireActionId(id), user.id()).orElseThrow(this::notFound));
+        return toResult(actions.findOwned(requireActionId(id), user.id()).orElseThrow(this::notFound));
     }
 
     @Transactional
     public AgentActionResult confirm(UserIdentity caller, String id) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
         // 此事务的第一条业务查询使用当前读并锁住动作。重试和并发确认都返回首次执行的结果。
-        AgentAction action = actions.findByIdAndOwnerIdForUpdate(requireActionId(id), user.id())
+        AgentAction action = actions.lockOwned(requireActionId(id), user.id())
                 .orElseThrow(this::notFound);
         if (action.getWorkflowId() != null) {
             throw new BusinessException(ErrorCode.CONFLICT, "请通过改期流程确认接口确认此预览");
@@ -131,11 +134,11 @@ public class AgentActionService {
     public void revokeForWorkflow(UserIdentity caller, String workflowId, String id) {
         AgentAction action = lockWorkflowAction(UserIdentity.requireAuthenticated(caller), workflowId, id);
         action.revoke();
-        actions.update(action);
+        requireUpdatedRow(actions.updateById(action));
     }
 
     private AgentAction lockWorkflowAction(UserIdentity user, String workflowId, String id) {
-        AgentAction action = actions.findByIdAndOwnerIdForUpdate(requireActionId(id), user.id()).orElseThrow(this::notFound);
+        AgentAction action = actions.lockOwned(requireActionId(id), user.id()).orElseThrow(this::notFound);
         if (!AgentIds.requireUuid(workflowId, "流程 ID").equals(action.getWorkflowId())) { throw notFound(); }
         return action;
     }
@@ -163,15 +166,17 @@ public class AgentActionService {
         };
         // 有效期在接收确认时判断；业务锁等待不应令一个已接收的确认再次过期。
         action.confirm(writeJson(result), acceptedAt);
-        actions.update(action);
+        requireUpdatedRow(actions.updateById(action));
         return toResult(action);
     }
 
     private AgentActionResult save(UserIdentity user, AgentActionKind kind, Long appointmentId, String customerName,
             Long expectedSlotId, Long targetSlotId, AgentActionPreview preview) {
         Instant created = Instant.now();
-        return toResult(actions.save(new AgentAction(UUID.randomUUID().toString(), user.id(), kind, appointmentId,
-                customerName, expectedSlotId, targetSlotId, writeJson(preview), created, created.plus(actionTtl))));
+        AgentAction action = new AgentAction(UUID.randomUUID().toString(), user.id(), kind, appointmentId,
+                customerName, expectedSlotId, targetSlotId, writeJson(preview), created, created.plus(actionTtl));
+        actions.insert(action);
+        return toResult(action);
     }
 
     private AppointmentResult requireAppointment(UserIdentity user, long id) {

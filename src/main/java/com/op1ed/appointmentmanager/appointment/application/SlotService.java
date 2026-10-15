@@ -9,13 +9,14 @@ import java.util.stream.Collectors;
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.BusinessInputs;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
+import com.op1ed.appointmentmanager.shared.persistence.StoragePage;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,17 +26,17 @@ import org.springframework.transaction.annotation.Transactional;
 public class SlotService {
 
     private final DoctorService doctorService;
-    private final AppointmentSlotRepository slotRepository;
-    private final AppointmentRepository appointmentRepository;
+    private final AppointmentSlotMapper slotMapper;
+    private final AppointmentMapper appointmentMapper;
 
     public SlotService(
             DoctorService doctorService,
-            AppointmentSlotRepository slotRepository,
-            AppointmentRepository appointmentRepository
+            AppointmentSlotMapper slotMapper,
+            AppointmentMapper appointmentMapper
     ) {
         this.doctorService = doctorService;
-        this.slotRepository = slotRepository;
-        this.appointmentRepository = appointmentRepository;
+        this.slotMapper = slotMapper;
+        this.appointmentMapper = appointmentMapper;
     }
 
     @Transactional
@@ -62,8 +63,8 @@ public class SlotService {
         }
 
         boolean overlaps =
-                slotRepository
-                        .existsByDoctorIdAndStartTimeLessThanAndEndTimeGreaterThan(
+                slotMapper
+                        .overlaps(
                                 doctorId,
                                 endTime,
                                 startTime
@@ -76,14 +77,15 @@ public class SlotService {
             );
         }
 
-        return toResult(slotRepository.save(slot), true);
+        slotMapper.insert(slot);
+        return toResult(slot, true);
     }
 
     public List<SlotResult> findByDoctorId(long doctorId) {
         doctorService.requireById(doctorId);
 
         List<AppointmentSlot> slots =
-                slotRepository.findByDoctorIdOrderByStartTimeAsc(doctorId);
+                slotMapper.listByDoctor(doctorId);
 
         if (slots.isEmpty()) {
             return List.of();
@@ -93,8 +95,8 @@ public class SlotService {
                 .map(AppointmentSlot::getId)
                 .toList();
 
-        Set<Long> occupiedSlotIds = appointmentRepository
-                .findBySlotIdInAndStatus(slotIds, AppointmentStatus.BOOKED)
+        Set<Long> occupiedSlotIds = appointmentMapper
+                .findBySlots(slotIds, AppointmentStatus.BOOKED)
                 .stream()
                 .map(Appointment::getSlotId)
                 .collect(Collectors.toSet());
@@ -112,14 +114,14 @@ public class SlotService {
 
     public Optional<SlotResult> findById(long id) {
         BusinessInputs.requirePositiveId(id, "时段 ID");
-        return slotRepository.findById(id).map(slot -> toResult(slot,
-                slot.isInFutureAt(Instant.now()) && !appointmentRepository.existsBySlotIdAndStatus(id, AppointmentStatus.BOOKED)));
+        return Optional.ofNullable(slotMapper.selectById(id)).map(slot -> toResult(slot,
+                slot.isInFutureAt(Instant.now()) && !appointmentMapper.existsOccupied(id, AppointmentStatus.BOOKED)));
     }
 
     public SlotPageResult searchAvailable(long doctorId, AvailableSlotQuery query) {
         doctorService.requireById(doctorId);
-        var page = slotRepository.searchAvailable(doctorId, Instant.now(), query.fromTime(), query.toTime(),
-                query.page(), query.size())
+        var page = StoragePage.from(slotMapper.searchAvailable(StoragePage.request(query.page(), query.size()),
+                doctorId, Instant.now(), query.fromTime(), query.toTime()))
                 .map(slot -> toResult(slot, true));
         return new SlotPageResult(page.getContent(), page.getNumber(), page.getSize(), page.getTotalElements(),
                 page.getTotalPages(), (long) page.getNumber() + 1 < page.getTotalPages());

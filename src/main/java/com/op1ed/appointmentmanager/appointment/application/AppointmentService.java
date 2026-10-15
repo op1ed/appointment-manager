@@ -9,9 +9,9 @@ import com.op1ed.appointmentmanager.appointment.domain.AppointmentAction;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentEvent;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentEventRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentEventMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
@@ -23,33 +23,35 @@ import com.op1ed.appointmentmanager.shared.persistence.StoragePage;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import static com.op1ed.appointmentmanager.shared.persistence.PersistenceChecks.requireUpdatedRow;
+
 @Service
 @Transactional(readOnly = true)
 public class AppointmentService {
 
-    private final AppointmentRepository appointmentRepository;
-    private final AppointmentSlotRepository slotRepository;
+    private final AppointmentMapper appointmentMapper;
+    private final AppointmentSlotMapper slotMapper;
     private final DoctorService doctorService;
-    private final AppointmentEventRepository eventRepository;
+    private final AppointmentEventMapper eventMapper;
 
     public AppointmentService(
-            AppointmentRepository appointmentRepository,
-            AppointmentSlotRepository slotRepository,
+            AppointmentMapper appointmentMapper,
+            AppointmentSlotMapper slotMapper,
             DoctorService doctorService,
-            AppointmentEventRepository eventRepository
+            AppointmentEventMapper eventMapper
     ) {
-        this.appointmentRepository = appointmentRepository;
-        this.slotRepository = slotRepository;
+        this.appointmentMapper = appointmentMapper;
+        this.slotMapper = slotMapper;
         this.doctorService = doctorService;
-        this.eventRepository = eventRepository;
+        this.eventMapper = eventMapper;
     }
 
     @Transactional
     public AppointmentResult create(UserIdentity caller, BookAppointmentCommand command) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
         // 创建预约的第一条数据库查询：锁住对应时段。
-        AppointmentSlot slot = slotRepository
-                .findByIdForUpdate(command.slotId())
+        AppointmentSlot slot = slotMapper
+                .lockById(command.slotId())
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.NOT_FOUND,
                         "预约时段不存在"
@@ -64,7 +66,7 @@ public class AppointmentService {
 
         DoctorInfo doctor = doctorService.requireById(slot.getDoctorId());
 
-        boolean occupied = appointmentRepository.existsBySlotIdAndStatus(
+        boolean occupied = appointmentMapper.existsOccupied(
                 slot.getId(),
                 AppointmentStatus.BOOKED
         );
@@ -85,21 +87,21 @@ public class AppointmentService {
                 slot.getEndTime()
         );
 
-        Appointment saved = appointmentRepository.save(appointment);
-        recordEvent(saved, user, AppointmentAction.BOOKED, null, saved.getSlotId());
-        return toResult(saved);
+        appointmentMapper.insert(appointment);
+        recordEvent(appointment, user, AppointmentAction.BOOKED, null, appointment.getSlotId());
+        return toResult(appointment);
     }
 
     public AppointmentPageResult search(UserIdentity caller, AppointmentQuery query) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
-        StoragePage<AppointmentResult> page = appointmentRepository.search(
+        StoragePage<AppointmentResult> page = StoragePage.from(appointmentMapper.search(
+                StoragePage.request(query.page(), query.size()),
                 user.administrator() ? null : user.id(),
                 query.status(),
                 query.customerName(),
                 query.fromTime(),
-                query.toTime(),
-                query.page(), query.size()
-        ).map(this::toResult);
+                query.toTime()
+        )).map(this::toResult);
 
         // 用 long 计算页号加一，避免极大页号发生整数溢出。
         boolean hasNext = (long) page.getNumber() + 1 < page.getTotalPages();
@@ -150,7 +152,7 @@ public class AppointmentService {
 
                     appointment.cancel();
                     // MyBatis 需要显式更新，预约与操作记录仍在同一个事务中提交。
-                    appointmentRepository.update(appointment);
+                    requireUpdatedRow(appointmentMapper.updateById(appointment));
                     recordEvent(appointment, user, AppointmentAction.CANCELLED, appointment.getSlotId(), null);
                     return toResult(appointment);
                 });
@@ -186,11 +188,11 @@ public class AppointmentService {
                 throw new BusinessException(ErrorCode.INVALID_ARGUMENT, "目标时段已经开始，不能改期");
             }
             DoctorInfo doctor = doctorService.requireById(target.getDoctorId());
-            if (appointmentRepository.existsBySlotIdAndStatus(target.getId(), AppointmentStatus.BOOKED)) {
+            if (appointmentMapper.existsOccupied(target.getId(), AppointmentStatus.BOOKED)) {
                 throw new BusinessException(ErrorCode.CONFLICT, "目标时段已经被预约");
             }
             appointment.rescheduleTo(target, doctor.name(), Instant.now());
-            appointmentRepository.update(appointment);
+            requireUpdatedRow(appointmentMapper.updateById(appointment));
             recordEvent(appointment, user, AppointmentAction.RESCHEDULED, originalSlotId, target.getId());
             return toResult(appointment);
         });
@@ -199,8 +201,8 @@ public class AppointmentService {
     public Optional<AppointmentHistoryPageResult> history(UserIdentity caller, long id, AppointmentHistoryQuery query) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
         return findVisible(user, id).map(appointment -> {
-            StoragePage<AppointmentHistoryEventResult> page = eventRepository.findByAppointmentId(appointment.getId(),
-                    query.page(), query.size())
+            StoragePage<AppointmentHistoryEventResult> page = StoragePage.from(eventMapper.history(
+                    StoragePage.request(query.page(), query.size()), appointment.getId()))
                     .map(event -> new AppointmentHistoryEventResult(event.getId(), event.getActorId(), event.getAction(),
                             event.getFromSlotId(), event.getToSlotId(), event.getOccurredAt()));
             return new AppointmentHistoryPageResult(page.getContent(), page.getNumber(), page.getSize(),
@@ -209,26 +211,26 @@ public class AppointmentService {
     }
 
     private Optional<Appointment> findVisibleForUpdate(UserIdentity user, long id) {
-        return appointmentRepository.findVisibleByIdForUpdate(id, user.administrator() ? null : user.id());
+        return appointmentMapper.lockVisible(id, user.administrator() ? null : user.id());
     }
 
     private AppointmentSlot lockSlot(Long id) {
-        return slotRepository.findByIdForUpdate(id)
+        return slotMapper.lockById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "预约时段不存在"));
     }
 
     private void recordEvent(Appointment appointment, UserIdentity actor, AppointmentAction action,
             Long fromSlotId, Long toSlotId) {
         // 与预约变更共用一个事务；记录保存失败时业务变更也会回滚。
-        eventRepository.save(new AppointmentEvent(appointment.getId(), actor.id(), action,
+        eventMapper.insert(new AppointmentEvent(appointment.getId(), actor.id(), action,
                 fromSlotId, toSlotId, Instant.now()));
     }
 
     private Optional<Appointment> findVisible(UserIdentity user, long id) {
         // 在查询中限制归属；他人的记录与不存在的记录都返回相同的 404。
         return user.administrator()
-                ? appointmentRepository.findById(id)
-                : appointmentRepository.findByIdAndOwnerId(id, user.id());
+                ? Optional.ofNullable(appointmentMapper.selectById(id))
+                : appointmentMapper.findOwned(id, user.id());
     }
 
     private AppointmentResult toResult(Appointment appointment) {

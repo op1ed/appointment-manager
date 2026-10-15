@@ -6,12 +6,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentEventRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentEventMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
@@ -30,12 +31,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.test.util.ReflectionTestUtils;
-import com.op1ed.appointmentmanager.shared.persistence.StoragePage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -49,23 +50,23 @@ class AppointmentServiceTest {
     private static final UserIdentity ADMIN = new UserIdentity(1L, "admin", "Admin", true);
 
     @Mock
-    private AppointmentRepository appointmentRepository;
+    private AppointmentMapper appointmentMapper;
 
     @Mock
-    private AppointmentSlotRepository slotRepository;
+    private AppointmentSlotMapper slotMapper;
 
     @Mock
     private DoctorService doctorService;
 
     @Mock
-    private AppointmentEventRepository eventRepository;
+    private AppointmentEventMapper eventMapper;
 
     private AppointmentService appointmentService;
 
     @BeforeEach
     void setUp() {
         appointmentService = new AppointmentService(
-                appointmentRepository, slotRepository, doctorService, eventRepository
+                appointmentMapper, slotMapper, doctorService, eventMapper
         );
     }
 
@@ -78,21 +79,21 @@ class AppointmentServiceTest {
                 assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
         );
 
-        verifyNoInteractions(appointmentRepository, slotRepository, doctorService);
+        verifyNoInteractions(appointmentMapper, slotMapper, doctorService);
     }
 
     @Test
     void shouldLockSlotBeforeReadingDoctorCheckingOccupancyAndSaving() {
         AppointmentSlot slot = futureSlot();
-        when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(slot));
+        when(slotMapper.lockById(11L)).thenReturn(Optional.of(slot));
         when(doctorService.requireById(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
-        when(appointmentRepository.existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED))
+        when(appointmentMapper.existsOccupied(11L, AppointmentStatus.BOOKED))
                 .thenReturn(false);
-        when(appointmentRepository.save(any(Appointment.class)))
+        when(appointmentMapper.insert(any(Appointment.class)))
                 .thenAnswer(invocation -> {
                     Appointment appointment = invocation.getArgument(0);
                     ReflectionTestUtils.setField(appointment, "id", 21L);
-                    return appointment;
+                    return 1;
                 });
 
         AppointmentResult result = appointmentService.create(ADMIN,
@@ -100,11 +101,11 @@ class AppointmentServiceTest {
         );
 
         ArgumentCaptor<Appointment> savedAppointment = ArgumentCaptor.forClass(Appointment.class);
-        InOrder order = inOrder(slotRepository, doctorService, appointmentRepository);
-        order.verify(slotRepository).findByIdForUpdate(11L);
+        InOrder order = inOrder(slotMapper, doctorService, appointmentMapper);
+        order.verify(slotMapper).lockById(11L);
         order.verify(doctorService).requireById(7L);
-        order.verify(appointmentRepository).existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED);
-        order.verify(appointmentRepository).save(savedAppointment.capture());
+        order.verify(appointmentMapper).existsOccupied(11L, AppointmentStatus.BOOKED);
+        order.verify(appointmentMapper).insert(savedAppointment.capture());
         order.verifyNoMoreInteractions();
 
         assertThat(savedAppointment.getValue().getCustomerName()).isEqualTo("张三");
@@ -116,15 +117,15 @@ class AppointmentServiceTest {
 
     @Test
     void shouldStopWhenSlotDoesNotExist() {
-        when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.empty());
+        when(slotMapper.lockById(11L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> appointmentService.create(ADMIN, new BookAppointmentCommand("张三", 11L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.NOT_FOUND)
                 );
 
-        verify(slotRepository).findByIdForUpdate(11L);
-        verifyNoInteractions(doctorService, appointmentRepository);
+        verify(slotMapper).lockById(11L);
+        verifyNoInteractions(doctorService, appointmentMapper);
     }
 
     @Test
@@ -132,23 +133,23 @@ class AppointmentServiceTest {
         Instant startTime = Instant.now().minusSeconds(3600);
         AppointmentSlot slot = new AppointmentSlot(7L, startTime, startTime.plusSeconds(1800));
         ReflectionTestUtils.setField(slot, "id", 11L);
-        when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(slot));
+        when(slotMapper.lockById(11L)).thenReturn(Optional.of(slot));
 
         assertThatThrownBy(() -> appointmentService.create(ADMIN, new BookAppointmentCommand("张三", 11L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
                 );
 
-        verify(slotRepository).findByIdForUpdate(11L);
-        verifyNoInteractions(doctorService, appointmentRepository);
+        verify(slotMapper).lockById(11L);
+        verifyNoInteractions(doctorService, appointmentMapper);
     }
 
     @Test
     void shouldNotSaveWhenSlotIsAlreadyBooked() {
         AppointmentSlot slot = futureSlot();
-        when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(slot));
+        when(slotMapper.lockById(11L)).thenReturn(Optional.of(slot));
         when(doctorService.requireById(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
-        when(appointmentRepository.existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED))
+        when(appointmentMapper.existsOccupied(11L, AppointmentStatus.BOOKED))
                 .thenReturn(true);
 
         assertThatThrownBy(() -> appointmentService.create(ADMIN, new BookAppointmentCommand("张三", 11L)))
@@ -156,16 +157,16 @@ class AppointmentServiceTest {
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.CONFLICT)
                 );
 
-        InOrder order = inOrder(slotRepository, doctorService, appointmentRepository);
-        order.verify(slotRepository).findByIdForUpdate(11L);
+        InOrder order = inOrder(slotMapper, doctorService, appointmentMapper);
+        order.verify(slotMapper).lockById(11L);
         order.verify(doctorService).requireById(7L);
-        order.verify(appointmentRepository).existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED);
-        verify(appointmentRepository, never()).save(any(Appointment.class));
+        order.verify(appointmentMapper).existsOccupied(11L, AppointmentStatus.BOOKED);
+        verify(appointmentMapper, never()).insert(any(Appointment.class));
     }
 
     @Test
     void shouldNotCheckOccupancyOrSaveWhenDoctorDoesNotExist() {
-        when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(futureSlot()));
+        when(slotMapper.lockById(11L)).thenReturn(Optional.of(futureSlot()));
         when(doctorService.requireById(7L))
                 .thenThrow(new BusinessException(ErrorCode.NOT_FOUND, "医生不存在"));
 
@@ -175,7 +176,7 @@ class AppointmentServiceTest {
                 );
 
         verify(doctorService).requireById(7L);
-        verifyNoInteractions(appointmentRepository);
+        verifyNoInteractions(appointmentMapper);
     }
 
     @ParameterizedTest
@@ -189,7 +190,7 @@ class AppointmentServiceTest {
                 assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
         );
 
-        verifyNoInteractions(appointmentRepository, slotRepository, doctorService);
+        verifyNoInteractions(appointmentMapper, slotMapper, doctorService);
     }
 
     @Test
@@ -207,22 +208,24 @@ class AppointmentServiceTest {
         );
         ReflectionTestUtils.setField(legacy, "id", 21L);
         ReflectionTestUtils.setField(current, "id", 22L);
-        when(appointmentRepository.search(
+        when(appointmentMapper.search(
+                any(),
                 eq((Long) null),
                 eq(AppointmentStatus.BOOKED), eq("张三"),
                 eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
-                eq(toTime.truncatedTo(ChronoUnit.MICROS)), eq(1), eq(2)
-        )).thenReturn(new StoragePage<>(List.of(legacy, current), 1, 2, 5L));
+                eq(toTime.truncatedTo(ChronoUnit.MICROS))
+        )).thenReturn(new Page<Appointment>(2, 2, 5L).setRecords(List.of(legacy, current)));
 
         AppointmentPageResult result = appointmentService.search(ADMIN, query);
 
-        verify(appointmentRepository).search(
+        verify(appointmentMapper).search(
+                argThat(page -> page.getCurrent() == 2 && page.getSize() == 2),
                 eq((Long) null),
                 eq(AppointmentStatus.BOOKED), eq("张三"),
                 eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
-                eq(toTime.truncatedTo(ChronoUnit.MICROS)), eq(1), eq(2)
+                eq(toTime.truncatedTo(ChronoUnit.MICROS))
         );
-        verifyNoInteractions(slotRepository, doctorService);
+        verifyNoInteractions(slotMapper, doctorService);
 
         assertThat(result.content()).extracting(AppointmentResult::id).containsExactly(21L, 22L);
         assertThat(result.content().get(0).slotId()).isNull();
@@ -244,34 +247,35 @@ class AppointmentServiceTest {
     @Test
     void shouldBindNewAppointmentToAuthenticatedAccount() {
         UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
-        when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(futureSlot()));
+        when(slotMapper.lockById(11L)).thenReturn(Optional.of(futureSlot()));
         when(doctorService.requireById(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
-        when(appointmentRepository.save(any(Appointment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(appointmentMapper.insert(any(Appointment.class))).thenReturn(1);
         appointmentService.create(user, new BookAppointmentCommand("代家人预约", 11L));
         ArgumentCaptor<Appointment> saved = ArgumentCaptor.forClass(Appointment.class);
-        verify(appointmentRepository).save(saved.capture());
+        verify(appointmentMapper).insert(saved.capture());
         assertThat(saved.getValue().getOwnerId()).isEqualTo(user.id());
     }
 
     @Test
     void shouldRestrictNormalUserSearchBeforeDatabasePagination() {
         UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
-        when(appointmentRepository.search(eq(31L), eq(null), eq(null), eq(null), eq(null), eq(0), eq(20)))
-                .thenReturn(new StoragePage<>(List.of(), 0, 20, 0L));
+        when(appointmentMapper.search(any(), eq(31L), eq(null), eq(null), eq(null), eq(null)))
+                .thenReturn(new Page<Appointment>(1, 20, 0L));
         AppointmentPageResult result = appointmentService.search(user, new AppointmentQuery(0, 20, null, null, null, null));
         assertThat(result.content()).isEmpty();
-        verify(appointmentRepository).search(eq(31L), eq(null), eq(null), eq(null), eq(null), eq(0), eq(20));
-        verifyNoInteractions(slotRepository, doctorService);
+        verify(appointmentMapper).search(argThat(page -> page.getCurrent() == 1 && page.getSize() == 20),
+                eq(31L), eq(null), eq(null), eq(null), eq(null));
+        verifyNoInteractions(slotMapper, doctorService);
     }
 
     @Test
     void shouldNotLockSlotOrModifyAppointmentForAnotherOwner() {
         UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
-        when(appointmentRepository.findVisibleByIdForUpdate(21L, 31L)).thenReturn(Optional.empty());
+        when(appointmentMapper.lockVisible(21L, 31L)).thenReturn(Optional.empty());
         assertThat(appointmentService.cancel(user, 21L)).isEmpty();
-        verify(appointmentRepository).findVisibleByIdForUpdate(21L, 31L);
-        verify(appointmentRepository, never()).findById(anyLong());
-        verifyNoInteractions(slotRepository, doctorService, eventRepository);
+        verify(appointmentMapper).lockVisible(21L, 31L);
+        verify(appointmentMapper, never()).selectById(anyLong());
+        verifyNoInteractions(slotMapper, doctorService, eventMapper);
     }
 
     @Test
@@ -279,7 +283,7 @@ class AppointmentServiceTest {
         assertThatThrownBy(() -> appointmentService.create(null, new BookAppointmentCommand("用户", 11L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.UNAUTHENTICATED));
-        verifyNoInteractions(appointmentRepository, slotRepository, doctorService);
+        verifyNoInteractions(appointmentMapper, slotMapper, doctorService);
     }
 
     private static Stream<Arguments> invalidBookingInputs() {

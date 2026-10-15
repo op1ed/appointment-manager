@@ -64,7 +64,7 @@ com.op1ed.appointmentmanager
 | `web` | HTTP 路径、JSON、输入格式校验、响应转换 | Controller、请求和响应 DTO |
 | `application` | 一次业务用例的流程、业务输入、事务边界 | 创建预约、发布时段、取消与改期、记录业务操作 |
 | `domain` | 业务对象及其自身行为 | 预约、时段、状态、改期条件、操作记录 |
-| `infrastructure.persistence` | 具体数据库访问 | Repository 组织数据访问，mapper 下的 MyBatis-Plus 接口执行 SQL |
+| `infrastructure.persistence.mapper` | 具体数据库访问 | MyBatis-Plus Mapper，提供通用读写与显式 SQL |
 
 `CreateAppointmentRequest` 是 HTTP 请求 DTO；Controller 将它转为 `BookAppointmentCommand`，调用预约应用服务。应用服务返回 `AppointmentResult`，再由 HTTP 响应 DTO 的 `from` 方法转换为原有 JSON。
 
@@ -72,7 +72,7 @@ com.op1ed.appointmentmanager
 
 应用服务负责资源存在、时段有效和占用情况等业务校验。HTTP 格式校验是入口的便利，业务规则仍要保护未来的 Agent 等调用入口。
 
-分页查询使用 `AppointmentQuery` 表达查询条件。`AppointmentService.search` 把筛选条件交给本模块 Repository，在数据库中分页和统计；Repository 用 `StoragePage` 隔离 MyBatis-Plus 的 `IPage`，应用服务再转换为 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。分页插件生成 count 与 LIMIT SQL，只查询当前页。
+分页查询使用 `AppointmentQuery` 表达查询条件。`AppointmentService.search` 直接调用本模块 Mapper，在数据库中分页和统计；应用服务用 `StoragePage` 统一转换页号和分页结果，再返回 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。分页插件生成 count 与 LIMIT SQL，只查询当前页。
 
 身份验证在 `identity.web.security` 适配器中完成：Spring Security 从 Bearer 令牌取得登录身份，Controller 收到普通 record `UserIdentity`，把它显式传给应用服务。应用服务不读取 `SecurityContextHolder`，也不依赖 HTTP 登录对象。身份模块内部验证账号和令牌，其他模块只使用其 `application` 入口。
 
@@ -81,8 +81,8 @@ com.op1ed.appointmentmanager
 这是轻量分层：
 
 - 业务模型使用 MyBatis-Plus 的 `@TableName`、`@TableId`，一套对象承担业务表达与表映射。
-- 应用服务调用本模块 Repository，Repository 调用 Mapper；通用 SQL 由 `BaseMapper` 提供，筛选与行锁在 Mapper 中明确声明。
-- 修改已有对象后显式调用 Repository 的 `update`，事务仍由应用服务的 `@Transactional` 控制。
+- 应用服务直接调用本模块 Mapper；通用 SQL 由 `BaseMapper` 提供，筛选与行锁在 Mapper 中明确声明。
+- 新增调用 `insert`，修改已有对象后调用 `updateById` 并检查影响行数，事务由应用服务的 `@Transactional` 控制。
 - 不为每个服务建立只有一个实现的接口。
 - 不增加 Maven 子模块、事件总线或远程服务调用。
 
@@ -96,17 +96,17 @@ flowchart TD
     TOOLS[Agent 工具和动作确认] --> APP
     TOOLS --> DOCTOR
     TOOLS --> IDENTITY
-    TOOLS --> ACTIONS[Agent 动作 Repository]
+    TOOLS --> ACTIONS[Agent 动作 Mapper]
     ACTIONS --> MYSQL
     APP --> DOMAIN[预约与时段模型]
-    APP --> REPO[预约模块 Repository]
+    APP --> MAPPER[预约模块 Mapper]
     APP --> DOCTOR[医生应用服务]
     HTTP --> IDENTITY[UserIdentity]
     APP --> IDENTITY
     DOCTOR --> INFO[DoctorInfo]
-    DOCTOR --> DREPO[医生模块 Repository]
-    REPO --> MYSQL[(MySQL)]
-    DREPO --> MYSQL
+    DOCTOR --> DMAPPER[医生模块 Mapper]
+    MAPPER --> MYSQL[(MySQL)]
+    DMAPPER --> MYSQL
     WEBERROR[统一 HTTP 异常处理] --> ERROR[共享业务异常]
     APP --> ERROR
     DOCTOR --> ERROR
@@ -115,14 +115,14 @@ flowchart TD
 遵循以下规则：
 
 1. `web` 调用 `application`，应用服务不依赖 Controller 或 HTTP DTO。
-2. 应用服务可以访问本模块的领域模型和 Repository。
-3. `appointment` 通过 `doctor.application.DoctorService` 使用医生能力，拿到普通 record `DoctorInfo`；不导入医生实体或 Repository。
+2. 应用服务可以访问本模块的领域模型和 Mapper。
+3. `appointment` 通过 `doctor.application.DoctorService` 使用医生能力，拿到普通 record `DoctorInfo`；不导入医生实体或 Mapper。
 4. `doctor` 不依赖 `appointment`，避免业务模块循环依赖。
-5. `domain` 不调用 Controller、应用服务或其他模块的 Repository。
+5. `domain` 不调用 Controller、应用服务或其他模块的 Mapper。
 6. 业务代码使用 `shared.error` 中的业务异常，`shared.web` 把错误转换为 HTTP ProblemDetail。
 7. `appointment` 和 `doctor` 只通过 `identity.application` 使用身份能力；身份模块不依赖预约或医生业务。
-8. 管理员初始化位于 `identity.infrastructure.bootstrap`，是调用应用服务的启动适配器；持久化 Repository 仍不依赖应用层。
-9. Agent 工具调用业务应用服务，共用规则、权限与事务，不直接操作其他模块的 Repository。调用身份由服务端注入，不能由模型生成账号 ID 或管理员标记。医生、预约和身份模块不依赖 Agent。
+8. 管理员初始化位于 `identity.infrastructure.bootstrap`，是调用应用服务的启动适配器；Mapper 不依赖应用层。
+9. Agent 工具调用业务应用服务，共用规则、权限与事务，不直接操作其他模块的 Mapper。调用身份由服务端注入，不能由模型生成账号 ID 或管理员标记。医生、预约和身份模块不依赖 Agent。
 
 架构测试用于检查这些边界，防止后续开发逐渐绕过约定。
 
@@ -145,7 +145,7 @@ flowchart TD
 4. 通过医生应用服务取得医生信息。
 5. 检查该时段是否存在 `BOOKED` 预约。
 6. 创建预约，保存登录账号的 `owner_id`、预约人姓名、时段 ID、医生姓名与起止时间。
-7. Repository 的 `save` 立即执行 INSERT 并回填主键，数据库唯一索引检查有效预约约束。
+7. Mapper 的 `insert` 立即执行 INSERT 并回填主键，数据库唯一索引检查有效预约约束。
 8. 同一事务保存 `BOOKED` 操作记录，操作人取当前登录账号。
 9. 返回业务结果；事务提交后释放行锁，Controller 转换为响应。
 
@@ -202,7 +202,7 @@ flowchart LR
     FLOW --> GRAPH[ReschedulingGraph / StateGraph]
     GRAPH --> CHECKPOINT[MybatisWorkflowCheckpointSaver]
     CHAT --> STORE[AgentConversationService]
-    STORE --> TABLES[会话与轮次 Repository]
+    STORE --> TABLES[会话与轮次 Mapper]
 ```
 
 这是在原有轻量分层上，为外部模型增加接口和适配器；没有为每个内部服务机械添加接口。对话协议、输入输出及限制见 [DeepSeek 对话说明](deepseek-chat.md)。
@@ -224,7 +224,7 @@ GET /api/appointments 的查询参数
     → HTTP Controller：解析数字、状态和带偏移的时间
     → Query：校验页码、页大小、姓名与时间边界
     → 应用服务：组织筛选、固定排序与数据库分页
-    → Repository：执行筛选查询和总数统计
+    → Mapper：执行筛选查询和总数统计
     → 分页 Result：业务记录与分页信息
     → 分页 Response：转换 content 中的预约并输出 JSON
 ```
@@ -240,14 +240,14 @@ GET /api/appointments 的查询参数
 
 应用服务计算 `hasNext`，分页 Result 保留它以及总记录数、总页数等分页信息，Response 负责输出这些字段。只有当前页的预约记录需要转换为业务结果和响应对象。
 
-普通用户查询时，应用服务把登录账号 ID 作为强制归属条件传给 Repository，记录查询和 countQuery 都包含这个条件。管理员允许查询全部记录。详情、取消与改期同样在数据库查询中限制归属，访问他人的 ID 与不存在的 ID 都返回 404。操作历史先确认预约可见，再查询该预约的记录与总数。
+普通用户查询时，应用服务把登录账号 ID 作为强制归属条件传给 Mapper，记录查询和 count SQL 都包含这个条件。管理员允许查询全部记录。详情、取消与改期同样在数据库查询中限制归属，访问他人的 ID 与不存在的 ID 都返回 404。操作历史先确认预约可见，再查询该预约的记录与总数。
 
 ## 建议的阅读顺序
 
 1. 从预约 Controller 看输入输出，再看 `BookAppointmentCommand` 和 `AppointmentResult`，理解入口与业务的交接；对照列表接口的 [AppointmentQuery](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentQuery.java)、[AppointmentPageResult](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentPageResult.java) 与 [AppointmentPageResponse](../src/main/java/com/op1ed/appointmentmanager/appointment/web/dto/AppointmentPageResponse.java)，区分创建输入与查询输入。
 2. 阅读 [预约应用服务](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java) 的创建方法，沿着事务、行锁、占用查询、保存的顺序画出流程。
 3. 阅读 `Appointment`、`AppointmentSlot`、`AppointmentStatus`，区分对象自身行为与跨对象协调。
-4. 阅读本模块 Repository 与 V3 迁移，理解代码检查和数据库约束各自保证什么；再沿着列表查询阅读筛选条件如何组合、分页如何交给数据库执行。
+4. 阅读本模块 Mapper 与 V3 迁移，理解代码检查和数据库约束各自保证什么；再沿着列表查询阅读筛选条件如何组合、分页如何交给数据库执行。
 5. 阅读 [医生应用服务](../src/main/java/com/op1ed/appointmentmanager/doctor/application/DoctorService.java)，重点看普通读取与 `lockForScheduling` 的区别。
 6. 阅读排班创建和取消逻辑，检查锁在什么时候获取、在什么时候释放。
 7. 阅读 [统一异常处理](../src/main/java/com/op1ed/appointmentmanager/shared/web/GlobalExceptionHandler.java)，跟踪一个业务冲突如何变成 HTTP 响应。

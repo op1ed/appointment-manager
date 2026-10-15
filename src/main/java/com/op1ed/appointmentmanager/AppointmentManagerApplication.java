@@ -11,7 +11,7 @@ import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServic
  * 全部阅读路线见 docs/project-reading-guide.md。
  *
  * <p>启动后由 Spring 组装项目中的组件：Controller 接收请求，Service 执行业务，
- * Repository 访问数据库。后续批次会用具体请求把这些组件串起来。
+ * Mapper 访问数据库。后续批次会用具体请求把这些组件串起来。
  */
 // @SpringBootApplication 启用 Spring Boot 自动配置，并扫描当前包及其子包中的组件。
 // 本类位于 com.op1ed.appointmentmanager，doctor、appointment、identity、agent 都在它的子包中。

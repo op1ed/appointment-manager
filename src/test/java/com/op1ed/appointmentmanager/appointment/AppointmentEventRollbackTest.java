@@ -1,7 +1,7 @@
 package com.op1ed.appointmentmanager.appointment;
 
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentEvent;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentEventRepository;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentEventMapper;
 import com.op1ed.appointmentmanager.appointment.web.dto.CreateAppointmentRequest;
 import com.op1ed.appointmentmanager.support.AppointmentApiFixtures;
 
@@ -15,7 +15,7 @@ import static org.mockito.Mockito.doThrow;
 
 class AppointmentEventRollbackTest extends AppointmentApiFixtures {
     @MockitoSpyBean
-    private AppointmentEventRepository eventRepository;
+    private AppointmentEventMapper eventMapper;
 
     @Test
     void shouldRollBackBookingWhenEventCannotBeSaved() {
@@ -57,6 +57,6 @@ class AppointmentEventRollbackTest extends AppointmentApiFixtures {
     private void failEventSave() {
         // 让失败发生在业务 SQL 已执行之后，验证真实事务会撤销这些数据库变更。
         doThrow(new IllegalStateException("Simulated appointment event storage failure"))
-                .when(eventRepository).save(any(AppointmentEvent.class));
+                .when(eventMapper).insert(any(AppointmentEvent.class));
     }
 }

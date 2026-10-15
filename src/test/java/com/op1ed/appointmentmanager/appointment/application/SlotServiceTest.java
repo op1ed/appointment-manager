@@ -5,8 +5,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.stream.Stream;
 
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentRepository;
-import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.AppointmentSlotRepository;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
@@ -44,16 +44,16 @@ class SlotServiceTest {
     private DoctorService doctorService;
 
     @Mock
-    private AppointmentSlotRepository slotRepository;
+    private AppointmentSlotMapper slotMapper;
 
     @Mock
-    private AppointmentRepository appointmentRepository;
+    private AppointmentMapper appointmentMapper;
 
     private SlotService slotService;
 
     @BeforeEach
     void setUp() {
-        slotService = new SlotService(doctorService, slotRepository, appointmentRepository);
+        slotService = new SlotService(doctorService, slotMapper, appointmentMapper);
     }
 
     @ParameterizedTest
@@ -64,7 +64,7 @@ class SlotServiceTest {
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.INVALID_ARGUMENT)
                 );
 
-        verifyNoInteractions(doctorService, slotRepository, appointmentRepository);
+        verifyNoInteractions(doctorService, slotMapper, appointmentMapper);
     }
 
     @Test
@@ -79,14 +79,14 @@ class SlotServiceTest {
                 );
 
         verify(doctorService).lockForScheduling(7L);
-        verifyNoInteractions(slotRepository, appointmentRepository);
+        verifyNoInteractions(slotMapper, appointmentMapper);
     }
 
     @Test
     void shouldNotSaveWhenAnotherSlotOverlaps() {
         CreateSlotCommand command = futureCommand();
         when(doctorService.lockForScheduling(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
-        when(slotRepository.existsByDoctorIdAndStartTimeLessThanAndEndTimeGreaterThan(
+        when(slotMapper.overlaps(
                 7L, command.endTime(), command.startTime()
         )).thenReturn(true);
 
@@ -95,13 +95,13 @@ class SlotServiceTest {
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.CONFLICT)
                 );
 
-        InOrder order = inOrder(doctorService, slotRepository);
+        InOrder order = inOrder(doctorService, slotMapper);
         order.verify(doctorService).lockForScheduling(7L);
-        order.verify(slotRepository).existsByDoctorIdAndStartTimeLessThanAndEndTimeGreaterThan(
+        order.verify(slotMapper).overlaps(
                 7L, command.endTime(), command.startTime()
         );
-        verify(slotRepository, never()).save(any(AppointmentSlot.class));
-        verifyNoInteractions(appointmentRepository);
+        verify(slotMapper, never()).insert(any(AppointmentSlot.class));
+        verifyNoInteractions(appointmentMapper);
     }
 
     @Test
@@ -111,26 +111,26 @@ class SlotServiceTest {
         Instant endTime = startTime.plusSeconds(1800);
         CreateSlotCommand command = new CreateSlotCommand(startTime, endTime);
         when(doctorService.lockForScheduling(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
-        when(slotRepository.existsByDoctorIdAndStartTimeLessThanAndEndTimeGreaterThan(
+        when(slotMapper.overlaps(
                 7L, command.endTime(), command.startTime()
         )).thenReturn(false);
-        when(slotRepository.save(any(AppointmentSlot.class))).thenAnswer(invocation -> {
+        when(slotMapper.insert(any(AppointmentSlot.class))).thenAnswer(invocation -> {
             AppointmentSlot slot = invocation.getArgument(0);
             ReflectionTestUtils.setField(slot, "id", 11L);
-            return slot;
+            return 1;
         });
 
         SlotResult result = slotService.create(ADMIN, 7L, command);
 
         ArgumentCaptor<AppointmentSlot> savedSlot = ArgumentCaptor.forClass(AppointmentSlot.class);
-        InOrder order = inOrder(doctorService, slotRepository);
+        InOrder order = inOrder(doctorService, slotMapper);
         order.verify(doctorService).lockForScheduling(7L);
-        order.verify(slotRepository).existsByDoctorIdAndStartTimeLessThanAndEndTimeGreaterThan(
+        order.verify(slotMapper).overlaps(
                 7L, command.endTime(), command.startTime()
         );
-        order.verify(slotRepository).save(savedSlot.capture());
+        order.verify(slotMapper).insert(savedSlot.capture());
         order.verifyNoMoreInteractions();
-        verifyNoInteractions(appointmentRepository);
+        verifyNoInteractions(appointmentMapper);
 
         assertThat(command.startTime()).isEqualTo(startTime.truncatedTo(ChronoUnit.MICROS));
         assertThat(command.endTime()).isEqualTo(endTime.truncatedTo(ChronoUnit.MICROS));
@@ -152,7 +152,7 @@ class SlotServiceTest {
         assertThatThrownBy(() -> slotService.create(user, 7L, futureCommand()))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.getCode()).isEqualTo(ErrorCode.FORBIDDEN));
-        verifyNoInteractions(doctorService, slotRepository, appointmentRepository);
+        verifyNoInteractions(doctorService, slotMapper, appointmentMapper);
     }
 
     private static Stream<Arguments> invalidSlotInputs() {

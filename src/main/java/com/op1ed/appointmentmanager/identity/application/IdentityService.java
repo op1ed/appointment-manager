@@ -7,8 +7,8 @@ import java.util.Optional;
 import com.op1ed.appointmentmanager.identity.domain.AccessToken;
 import com.op1ed.appointmentmanager.identity.domain.AccountRole;
 import com.op1ed.appointmentmanager.identity.domain.UserAccount;
-import com.op1ed.appointmentmanager.identity.infrastructure.persistence.AccessTokenRepository;
-import com.op1ed.appointmentmanager.identity.infrastructure.persistence.UserAccountRepository;
+import com.op1ed.appointmentmanager.identity.infrastructure.persistence.mapper.AccessTokenMapper;
+import com.op1ed.appointmentmanager.identity.infrastructure.persistence.mapper.UserAccountMapper;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
@@ -30,15 +30,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional(readOnly = true)
 public class IdentityService {
-    private final UserAccountRepository accounts; // 查询、保存 user_accounts 中的账号。
-    private final AccessTokenRepository tokens; // 查询、保存或撤销 user_access_tokens 中的令牌记录。
+    private final UserAccountMapper accounts; // 查询、保存 user_accounts 中的账号。
+    private final AccessTokenMapper tokens; // 查询、保存或撤销 user_access_tokens 中的令牌记录。
     private final PasswordEncoder passwordEncoder; // 密码散列与匹配接口，当前由 BCryptPasswordEncoder 实现。
     private final Duration tokenTtl; // 一次登录发出的令牌能有效多久。
     private final String dummyPasswordHash; // 账号不存在时仍用于执行一次密码匹配，下面的 login 会用到。
 
     public IdentityService(
-            UserAccountRepository accounts,
-            AccessTokenRepository tokens,
+            UserAccountMapper accounts,
+            AccessTokenMapper tokens,
             PasswordEncoder passwordEncoder,
             // Spring 读取配置，未设置时用 PT24H，并转换成 Java 的 Duration（时长）。
             @Value("${app.security.token-ttl:PT24H}") Duration tokenTtl
@@ -68,9 +68,10 @@ public class IdentityService {
                 passwordEncoder.encode(command.password()), AccountRole.USER
         );
         try {
-            // 3. Repository.save 调用 MyBatis-Plus insert，立即执行 SQL，由数据库检查唯一约束。
+            // 3. 直接调用 Mapper.insert，立即执行 SQL，由数据库检查唯一约束。
             // MyBatis 将数据库生成的 id 回填到对象，再整理成 UserIdentity 返回；事务由外层管理。
-            return toIdentity(accounts.save(account));
+            accounts.insert(account);
+            return toIdentity(account);
         } catch (DataIntegrityViolationException exception) {
             // 唯一约束也保护两个注册请求同时使用同一用户名的情况。
             throw usernameConflict();
@@ -96,12 +97,13 @@ public class IdentityService {
         // 3. 生成随机原始令牌，客户端后续用它证明自己已登录；这不是密码，也不是账号 id。
         String rawToken = AccessTokens.generate();
         // 4. 保存账号 id、令牌的 SHA-256 散列与过期时间。服务器以后将收到的令牌散列后查询。
-        AccessToken saved = tokens.save(new AccessToken(
+        AccessToken token = new AccessToken(
                 account.getId(), AccessTokens.hash(rawToken), Instant.now().plus(tokenTtl)
-        ));
+        );
+        tokens.insert(token);
         // 5. 原始令牌只在这次登录响应中发给客户端；数据表中保存的是散列。
         // Controller 再将此业务结果转为 LoginResponse，其中包含 tokenType="Bearer"。
-        return new AccessTokenResult(rawToken, saved.getExpiresAt(), toIdentity(account));
+        return new AccessTokenResult(rawToken, token.getExpiresAt(), toIdentity(account));
     }
 
     /** 3B 再读：后续请求提供原始令牌，在数据库中验证它并取得登录身份。 */
@@ -111,7 +113,7 @@ public class IdentityService {
         }
         return tokens.findByTokenHash(AccessTokens.hash(rawToken))
                 .filter(token -> token.isValidAt(Instant.now()))
-                .flatMap(token -> accounts.findById(token.getUserId()))
+                .flatMap(token -> Optional.ofNullable(accounts.selectById(token.getUserId())))
                 .map(this::toIdentity);
     }
 
@@ -134,10 +136,12 @@ public class IdentityService {
             }
             return toIdentity(account);
         }
-        return toIdentity(accounts.save(new UserAccount(
+        UserAccount account = new UserAccount(
                 command.username(), command.displayName(),
                 passwordEncoder.encode(command.password()), AccountRole.ADMIN
-        )));
+        );
+        accounts.insert(account);
+        return toIdentity(account);
     }
 
     // 从持久化实体取出业务需要的身份信息：id、用户名、显示姓名和是否为管理员。

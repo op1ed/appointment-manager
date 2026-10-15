@@ -43,7 +43,7 @@ Agent 在这套业务之上增加自然语言入口。例如用户说“帮我�
 | web | 请求入口 | 接收 HTTP、读取参数、调用应用服务、返回 JSON |
 | application | 用例执行者 | 完成一次业务操作，组织校验、事务和其他服务调用 |
 | domain | 业务对象 | 表达医生、预约、时段及对象自身的规则 |
-| infrastructure/persistence | 数据库访问 | Repository 组织查询与保存，mapper 下的接口执行 SQL 和申请数据库锁 |
+| infrastructure/persistence/mapper | 数据库访问 | Service 直接调用 Mapper，执行 SQL 和申请数据库锁 |
 
 这是“模块化单体”：所有业务在一个 Java 应用里运行，使用同一个 MySQL。包目录表达职责和调用边界；当前没有把它们拆成多个独立服务。
 
@@ -56,8 +56,7 @@ flowchart LR
     CLIENT[用户或终端客户端] --> SECURITY[身份与访问规则]
     SECURITY --> CONTROLLER[Controller 接收请求]
     CONTROLLER --> SERVICE[Service 完成业务]
-    SERVICE --> REPO[Repository 访问数据]
-    REPO --> MAPPER[MyBatis-Plus Mapper]
+    SERVICE --> MAPPER[MyBatis-Plus Mapper]
     MAPPER --> DB[(MySQL)]
 ```
 
@@ -66,7 +65,7 @@ flowchart LR
 1. `SecurityConfiguration` 配置允许公开查询医生。
 2. `DoctorController.getDoctor` 从路径中取得 7，调用 `DoctorService.requireById(7)`。
 3. Service 查询并检查医生是否存在，返回业务结果 DoctorInfo；不存在则抛业务异常。
-4. `DoctorRepository` 调用 `DoctorMapper`，MyBatis-Plus 执行 SQL 访问 doctors 表，Doctor 映射查询结果。按主键查询与插入来自 `BaseMapper`，分页和行锁 SQL 在 Mapper 文件中。
+4. Service 直接调用 `DoctorMapper`，MyBatis-Plus 执行 SQL 访问 doctors 表，Doctor 映射查询结果。按主键查询与插入来自 `BaseMapper`，分页和行锁 SQL 在 Mapper 文件中。
 5. Controller 把 DoctorInfo 转成 DoctorResponse，Spring 将响应转换为 JSON。
 
 这条链对应已读的第二批（医生模块），可以用来复习各层之间如何配合。
@@ -94,10 +93,10 @@ Agent 工具也会调用 Service。因此权限、占用检查和事务放在业
 | 批次 | 主题 | 读完应能说明什么 |
 | --- | --- | --- |
 | 1，已读 | 全局地图、依赖、启动和配置 | 项目做什么、各层在哪、程序如何启动 |
-| 2，已读 | 医生查询与创建 | 一个简单请求如何经过 Controller、Service、Repository 和实体 |
+| 2，已读 | 医生查询与创建 | 一个简单请求如何经过 Controller、Service、Mapper 和实体 |
 | 3A，已读 | 注册与登录 | 账号怎样保存、密码怎样校验、登录怎样发出令牌 |
 | 3B，已基本读过 | 令牌验证、退出和权限 | 后续请求怎样确定当前用户、哪些操作需要管理员 |
-| **3C，当前** | MyBatis-Plus 的数据访问 | Repository 与 Mapper 怎样配合，新增、更新和数据库事务怎样执行 |
+| **3C，当前** | MyBatis-Plus 的数据访问 | Service 怎样调用 Mapper，新增、更新和数据库事务怎样执行 |
 | 4，下一批 | 发布时段与查询可用时段 | 医生和时段如何关联，如何检查时间重叠 |
 | 5 | 创建预约与并发占用 | 如何防止两个人同时约到同一时段，事务与锁各做什么 |
 | 6 | 取消、改期和操作记录 | 状态怎样变化，失败怎样回滚，重复操作如何处理 |
@@ -112,7 +111,7 @@ Agent 工具也会调用 Service。因此权限、占用检查和事务放在业
 下面三个问题用于回顾项目的全局结构：
 
 1. 医生、时段、预约、登录账号分别代表什么？
-2. 接到请求后，Controller、Service、Repository 各做哪部分工作？
+2. 接到请求后，Controller、Service、Mapper 各做哪部分工作？
 3. pom.xml、启动类、application.properties 分别管什么？
 
 详细架构约定在 [architecture.md](architecture.md)。后续读到具体业务时再结合它查阅。

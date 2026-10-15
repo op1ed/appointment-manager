@@ -71,7 +71,7 @@ V5 创建 `appointment_events`，每条记录保存：
 1. [RescheduleAppointmentCommand](../src/main/java/com/op1ed/appointmentmanager/appointment/application/RescheduleAppointmentCommand.java) 和 [AppointmentHistoryQuery](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentHistoryQuery.java)：业务入口如何验证输入。
 2. [AppointmentService](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java)：锁顺序、归属、事务、改期与记录保存。
 3. [Appointment](../src/main/java/com/op1ed/appointmentmanager/appointment/domain/Appointment.java)：模型如何拒绝不允许的改期，并保留账号与姓名。
-4. [AppointmentRepository](../src/main/java/com/op1ed/appointmentmanager/appointment/infrastructure/persistence/AppointmentRepository.java) 和 [V5](../src/main/resources/db/migration/V5__add_appointment_events.sql)：加锁查询、外键与历史分页索引。
+4. [AppointmentMapper](../src/main/java/com/op1ed/appointmentmanager/appointment/infrastructure/persistence/mapper/AppointmentMapper.java) 和 [V5](../src/main/resources/db/migration/V5__add_appointment_events.sql)：加锁查询、外键与历史分页索引。
 5. [并发集成测试](../src/test/java/com/op1ed/appointmentmanager/appointment/AppointmentRescheduleControllerTest.java) 与 [回滚测试](../src/test/java/com/op1ed/appointmentmanager/appointment/AppointmentEventRollbackTest.java)：读取最终数据库状态，理解并发请求允许的结果。
 
 以后 Agent 可以查询预约与可用时段，取得 `expectedSlotId` 后提交改期。身份由服务端注入，工具仍调用同一个应用服务；操作记录可以用于展示执行结果和排查失败。
