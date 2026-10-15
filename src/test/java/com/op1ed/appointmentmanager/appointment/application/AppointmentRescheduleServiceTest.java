@@ -32,6 +32,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -72,7 +73,7 @@ class AppointmentRescheduleServiceTest {
         order.verify(slots).findByIdForUpdate(Math.max(originalId, targetId));
         order.verify(doctors).requireById(7L);
         order.verify(appointments).existsBySlotIdAndStatus(targetId, AppointmentStatus.BOOKED);
-        order.verify(appointments).flush();
+        order.verify(appointments).update(appointment);
         ArgumentCaptor<AppointmentEvent> event = ArgumentCaptor.forClass(AppointmentEvent.class);
         order.verify(events).save(event.capture());
         assertThat(result.id()).isEqualTo(21L);
@@ -101,7 +102,7 @@ class AppointmentRescheduleServiceTest {
         assertThat(service.reschedule(USER, 21L, new RescheduleAppointmentCommand(11L, 12L))
                 .orElseThrow().slotId()).isEqualTo(12L);
         verifyNoInteractions(slots, doctors, events);
-        verify(appointments, never()).flush();
+        verify(appointments, never()).update(any(Appointment.class));
     }
 
     @Test
@@ -129,7 +130,7 @@ class AppointmentRescheduleServiceTest {
         when(appointments.findVisibleByIdForUpdate(21L, null)).thenReturn(Optional.of(cancelled));
         assertThat(service.cancel(ADMIN, 21L).orElseThrow().status()).isEqualTo(AppointmentStatus.CANCELLED);
         verifyNoInteractions(slots, doctors, events);
-        verify(appointments, never()).flush();
+        verify(appointments, never()).update(any(Appointment.class));
     }
 
     @ParameterizedTest

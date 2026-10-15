@@ -47,7 +47,7 @@ flowchart TD
 
 状态键显式登记为 `KeyStrategy.REPLACE`。这个版本恢复时只导入注册过的键，遗漏 signal 或业务参数会丢失恢复信息。检查点只存 JSON 字符串、数字；登录身份放在当次 metadata 中，每次由服务端重新注入。
 
-阅读顺序：`WorkflowCommands` → `ReschedulingWorkflowService` → `ReschedulingWorkflowTransactions` → `SpringAiReschedulingGraph` → `ReschedulingWorkflowOperations` → `JpaWorkflowCheckpointSaver`。依次看用例输入、事务边界、节点与分支、节点业务、持久化。
+阅读顺序：`WorkflowCommands` → `ReschedulingWorkflowService` → `ReschedulingWorkflowTransactions` → `SpringAiReschedulingGraph` → `ReschedulingWorkflowOperations` → `MybatisWorkflowCheckpointSaver`。依次看用例输入、事务边界、节点与分支、节点业务、持久化。
 
 ## API 与客户端
 
@@ -80,7 +80,7 @@ requestId 为客户端生成的标准小写 UUID。时间必须带时区，区�
 
 ## 持久化与事务
 
-V8 新增流程、请求响应日志和检查点表，动作新增 `workflow_id`、`REVOKED`。`JpaWorkflowCheckpointSaver` 没有进程内缓存，每次从 MySQL 读取。它必须在 Spring 事务内调用，与业务变更共用事务。
+V8 新增流程、请求响应日志和检查点表，动作新增 `workflow_id`、`REVOKED`。`MybatisWorkflowCheckpointSaver` 没有进程内缓存，每次从 MySQL 读取。它必须在 Spring 事务内调用，与业务变更共用事务；已有检查点显式 UPDATE，新检查点 INSERT，失败时整体回滚。
 
 一次推进一起提交：Graph 检查点、预览状态、预约与操作记录、流程 revision、请求响应日志。任何一步出错，全部回滚。单独保存 Graph，而让预约独立提交，会留下流程状态与预约不一致的问题。
 

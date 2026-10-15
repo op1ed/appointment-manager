@@ -127,7 +127,7 @@ class AppointmentSearchControllerTest extends AuthenticatedApiTest {
         assertThat(cancelled.totalElements()).isEqualTo(1L);
         assertThat(cancelled.content().get(0).status()).isEqualTo(AppointmentStatus.CANCELLED);
 
-        // Full first pages force Spring Data to execute the filtered count query.
+        // 同时验证当前页与筛选后的总数，避免 count SQL 丢失筛选条件。
         AppointmentPageResponse bookedCount = search(Map.of(
                 "customerName", customerName, "status", "BOOKED", "size", 1
         ));

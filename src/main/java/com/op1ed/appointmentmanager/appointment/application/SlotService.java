@@ -18,8 +18,6 @@ import com.op1ed.appointmentmanager.shared.error.BusinessInputs;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
 import org.springframework.stereotype.Service;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -121,7 +119,7 @@ public class SlotService {
     public SlotPageResult searchAvailable(long doctorId, AvailableSlotQuery query) {
         doctorService.requireById(doctorId);
         var page = slotRepository.searchAvailable(doctorId, Instant.now(), query.fromTime(), query.toTime(),
-                PageRequest.of(query.page(), query.size(), Sort.by("startTime", "id")))
+                query.page(), query.size())
                 .map(slot -> toResult(slot, true));
         return new SlotPageResult(page.getContent(), page.getNumber(), page.getSize(), page.getTotalElements(),
                 page.getTotalPages(), (long) page.getNumber() + 1 < page.getTotalPages());

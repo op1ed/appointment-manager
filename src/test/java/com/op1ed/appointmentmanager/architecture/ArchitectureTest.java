@@ -126,4 +126,11 @@ class ArchitectureTest {
                 .should().dependOnClassesThat().resideInAnyPackage("com.alibaba.cloud.ai..", "org.springframework.ai..")
                 .check(productionClasses);
     }
+
+    @Test
+    void projectMustUseMybatisInsteadOfJpaPersistence() {
+        noClasses().that().resideInAPackage(BASE + "..")
+                .should().dependOnClassesThat().resideInAnyPackage("jakarta.persistence..", "org.hibernate..", "org.springframework.data.jpa..")
+                .check(productionClasses);
+    }
 }

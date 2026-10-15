@@ -2,6 +2,8 @@
 
 从零实现的预约管理学习项目。先完成可部署、可验证的后端业务，再接入 Agent，让不同入口共用同一套预约规则。
 
+**从头阅读代码，从 [项目全局导读与分批阅读顺序](docs/project-reading-guide.md) 开始。** 第一批先认识业务、目录、启动和配置，后续逐批阅读医生、权限、预约与 Agent。
+
 目前采用 **模块化单体：按业务分包，模块内部轻量分层**。一个 Maven 工程构建一个应用，账号和登录属于 `identity` 模块，医生资料属于 `doctor` 模块，排班时段和预约属于 `appointment` 模块，工具调用和待确认动作属于 `agent` 模块。详细的职责、依赖关系和阅读顺序见 [架构说明](docs/architecture.md)。
 
 ## 已实现的业务
@@ -35,8 +37,8 @@
 | 语言与构建 | Java 21、Maven |
 | HTTP 与校验 | Spring Boot 3.5.16、Spring Web、Bean Validation |
 | 身份与权限 | Spring Security、BCrypt 密码散列、数据库访问令牌、预约归属校验 |
-| 数据库访问 | Spring Data JPA、Hibernate、MySQL 8.4 |
-| 表结构管理 | Flyway；Hibernate 使用 `ddl-auto=validate` 校验映射 |
+| 数据库访问 | MyBatis-Plus 3.5.17、MySQL 8.4 |
+| 表结构管理 | Flyway 迁移；映射与 SQL 由真实 MySQL 集成测试验证 |
 | 持续集成 | GitHub Actions，使用真实 MySQL 执行测试并生成 JAR |
 | 部署 | Docker 多阶段构建、Docker Compose |
 | 部署验证 | Python 3 标准库脚本，验证业务数据、操作记录和 Agent 动作的重启持久化 |
@@ -290,7 +292,7 @@ sudo docker compose up -d --build
 sudo docker compose ps
 ```
 
-应用启动时由 Flyway 按顺序执行尚未执行的迁移，再由 Hibernate 校验表结构。已执行的迁移保持原样，后续表结构修改添加新的版本文件。
+应用启动时由 Flyway 按顺序执行尚未执行的迁移。MyBatis-Plus 映射已有表，不负责自动建表或 Hibernate 式的实体结构校验；字段、查询与约束由真实 MySQL 集成测试验证。已执行的迁移保持原样，后续表结构修改添加新的版本文件。本次切换数据访问框架沿用 V1～V8 和已有数据，见 [MyBatis-Plus 阅读说明](docs/mybatis-plus-migration.md)。
 
 Compose 将应用绑定到服务器的 `127.0.0.1:8080`，可以在服务器终端访问。数据库数据保存在 `mysql-data` 命名卷中。
 

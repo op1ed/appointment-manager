@@ -10,7 +10,7 @@
 | `appointment` | 排班时段、预约、取消、改期、操作记录、占用规则 | 发布时段、查询可用性、创建、取消和改期预约、查询操作记录 |
 | `identity` | 账号、密码校验、登录令牌与身份信息 | 注册、登录、验证令牌、退出、初始化管理员；提供 `UserIdentity` |
 | `agent` | 工具、动作、会话、改期流程、检查点与请求日志 | ReactAgent 对话、StateGraph 用户确认与恢复、权限、预算、结果重放 |
-| `shared` | 各模块共用的错误定义与 HTTP 错误转换 | 业务异常、统一错误响应 |
+| `shared` | 共用错误、HTTP 错误转换与持久化配置 | 业务异常、统一错误响应、Mapper 扫描与分页、UTC 时间映射 |
 
 `shared` 保持小范围，不承载医生或预约业务。`agent` 通过业务应用服务使用医生和预约能力，不直接查询这些模块的表或导入其实体；它拥有自己的动作、会话和对话轮次表。模型 HTTP 适配器位于 `agent.infrastructure.deepseek`。
 
@@ -55,7 +55,8 @@ com.op1ed.appointmentmanager
 │       └── springai
 └── shared
     ├── error
-    └── web
+    ├── web
+    └── persistence
 ```
 
 | 层 | 负责什么 | 预约中的例子 |
@@ -63,7 +64,7 @@ com.op1ed.appointmentmanager
 | `web` | HTTP 路径、JSON、输入格式校验、响应转换 | Controller、请求和响应 DTO |
 | `application` | 一次业务用例的流程、业务输入、事务边界 | 创建预约、发布时段、取消与改期、记录业务操作 |
 | `domain` | 业务对象及其自身行为 | 预约、时段、状态、改期条件、操作记录 |
-| `infrastructure.persistence` | 具体数据库访问 | JPA Repository、带行锁的查询 |
+| `infrastructure.persistence` | 具体数据库访问 | Repository 组织数据访问，mapper 下的 MyBatis-Plus 接口执行 SQL |
 
 `CreateAppointmentRequest` 是 HTTP 请求 DTO；Controller 将它转为 `BookAppointmentCommand`，调用预约应用服务。应用服务返回 `AppointmentResult`，再由 HTTP 响应 DTO 的 `from` 方法转换为原有 JSON。
 
@@ -71,7 +72,7 @@ com.op1ed.appointmentmanager
 
 应用服务负责资源存在、时段有效和占用情况等业务校验。HTTP 格式校验是入口的便利，业务规则仍要保护未来的 Agent 等调用入口。
 
-分页查询使用 `AppointmentQuery` 表达查询条件。`AppointmentService.search` 把筛选条件交给本模块 Repository，在数据库中分页和统计；再把查询结果转换为 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。HTTP 层不直接暴露 Spring Data 的 `Page`，也不把所有预约先加载到内存后分页。
+分页查询使用 `AppointmentQuery` 表达查询条件。`AppointmentService.search` 把筛选条件交给本模块 Repository，在数据库中分页和统计；Repository 用 `StoragePage` 隔离 MyBatis-Plus 的 `IPage`，应用服务再转换为 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。分页插件生成 count 与 LIMIT SQL，只查询当前页。
 
 身份验证在 `identity.web.security` 适配器中完成：Spring Security 从 Bearer 令牌取得登录身份，Controller 收到普通 record `UserIdentity`，把它显式传给应用服务。应用服务不读取 `SecurityContextHolder`，也不依赖 HTTP 登录对象。身份模块内部验证账号和令牌，其他模块只使用其 `application` 入口。
 
@@ -79,8 +80,9 @@ com.op1ed.appointmentmanager
 
 这是轻量分层：
 
-- 业务模型继续使用 JPA 实体注解，一套对象承担业务表达与持久化映射。
-- 应用服务直接调用本模块的 JPA Repository。
+- 业务模型使用 MyBatis-Plus 的 `@TableName`、`@TableId`，一套对象承担业务表达与表映射。
+- 应用服务调用本模块 Repository，Repository 调用 Mapper；通用 SQL 由 `BaseMapper` 提供，筛选与行锁在 Mapper 中明确声明。
+- 修改已有对象后显式调用 Repository 的 `update`，事务仍由应用服务的 `@Transactional` 控制。
 - 不为每个服务建立只有一个实现的接口。
 - 不增加 Maven 子模块、事件总线或远程服务调用。
 
@@ -143,7 +145,7 @@ flowchart TD
 4. 通过医生应用服务取得医生信息。
 5. 检查该时段是否存在 `BOOKED` 预约。
 6. 创建预约，保存登录账号的 `owner_id`、预约人姓名、时段 ID、医生姓名与起止时间。
-7. 保存并刷新数据，数据库唯一索引检查有效预约约束。
+7. Repository 的 `save` 立即执行 INSERT 并回填主键，数据库唯一索引检查有效预约约束。
 8. 同一事务保存 `BOOKED` 操作记录，操作人取当前登录账号。
 9. 返回业务结果；事务提交后释放行锁，Controller 转换为响应。
 
@@ -179,7 +181,7 @@ V4 之前的预约 `owner_id` 为空，只向管理员开放，普通用户不�
 
 移动包路径时，这些事务与查询顺序都要保留。包结构不会自动保证并发正确性，必须由事务、锁、数据库约束和测试共同验证。
 
-Agent 确认在最外层开启写事务，第一条业务查询锁定当前账号的动作记录。然后直接调用创建、取消或改期应用服务，加入同一事务；预约服务保持原有预约和时段锁顺序。动作确认之前不再重做普通查询，避免 MySQL 的事务快照早于业务锁等待完成。最后保存预约结果快照并刷新动作记录，任何一环失败都回滚业务变更和确认状态。两个请求确认同一个动作时，后者等待动作行锁并返回前者保存的结果。
+Agent 确认在最外层开启写事务，第一条业务查询锁定当前账号的动作记录。然后直接调用创建、取消或改期应用服务，加入同一事务；预约服务保持原有预约和时段锁顺序。动作确认之前不再重做普通查询，避免 MySQL 的事务快照早于业务锁等待完成。最后保存预约结果快照并显式更新动作记录，任何一环失败都回滚业务变更和确认状态。两个请求确认同一个动作时，后者等待动作行锁并返回前者保存的结果。
 
 `AgentChatService` 不开启事务。历史读取、单个工具执行、对话保存分别使用短事务；模型网络等待不持有数据库事务或行锁。保存对话时先锁会话，再校验读取时的修订号，避免覆盖另一请求已经保存的上下文。详细的预览与确认边界见 [Agent 工具与动作确认](agent-tools.md)。
 
@@ -198,7 +200,7 @@ flowchart LR
     REACT --> TOOLS[AgentToolService]
     TOOLS --> FLOW[改期流程服务]
     FLOW --> GRAPH[ReschedulingGraph / StateGraph]
-    GRAPH --> CHECKPOINT[JpaWorkflowCheckpointSaver]
+    GRAPH --> CHECKPOINT[MybatisWorkflowCheckpointSaver]
     CHAT --> STORE[AgentConversationService]
     STORE --> TABLES[会话与轮次 Repository]
 ```

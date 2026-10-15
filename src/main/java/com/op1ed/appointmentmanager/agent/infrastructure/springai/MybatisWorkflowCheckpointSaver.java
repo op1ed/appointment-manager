@@ -18,10 +18,10 @@ import org.springframework.transaction.annotation.Transactional;
 /** 无进程内缓存；检查点与预约、动作、请求日志共用 Spring 事务。 */
 @Component
 @Transactional(propagation = Propagation.MANDATORY)
-public class JpaWorkflowCheckpointSaver implements BaseCheckpointSaver {
+public class MybatisWorkflowCheckpointSaver implements BaseCheckpointSaver {
     private final WorkflowCheckpointRepository checkpoints;
     private final ObjectMapper json;
-    public JpaWorkflowCheckpointSaver(WorkflowCheckpointRepository checkpoints, ObjectMapper json) {
+    public MybatisWorkflowCheckpointSaver(WorkflowCheckpointRepository checkpoints, ObjectMapper json) {
         this.checkpoints = checkpoints; this.json = json;
     }
     @Override public Collection<Checkpoint> list(RunnableConfig config) {
@@ -34,11 +34,12 @@ public class JpaWorkflowCheckpointSaver implements BaseCheckpointSaver {
     }
     @Override public RunnableConfig put(RunnableConfig config, Checkpoint checkpoint) throws Exception {
         String state = json.writeValueAsString(checkpoint.getState());
-        WorkflowCheckpoint row = checkpoints.findByWorkflowIdAndCheckpointId(thread(config), checkpoint.getId())
-                .orElseGet(() -> new WorkflowCheckpoint(checkpoint.getId(), thread(config), checkpoint.getNodeId(),
+        var existing = checkpoints.findByWorkflowIdAndCheckpointId(thread(config), checkpoint.getId());
+        WorkflowCheckpoint row = existing.orElseGet(() -> new WorkflowCheckpoint(checkpoint.getId(), thread(config), checkpoint.getNodeId(),
                         checkpoint.getNextNodeId(), state));
         row.update(checkpoint.getNodeId(), checkpoint.getNextNodeId(), state);
-        checkpoints.saveAndFlush(row);
+        if (existing.isPresent()) { checkpoints.update(row); }
+        else { checkpoints.save(row); }
         return RunnableConfig.builder(config).checkPointId(checkpoint.getId()).build();
     }
     @Override public Tag release(RunnableConfig config) {

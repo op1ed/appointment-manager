@@ -30,10 +30,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import com.op1ed.appointmentmanager.shared.persistence.StoragePage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -91,7 +88,7 @@ class AppointmentServiceTest {
         when(doctorService.requireById(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
         when(appointmentRepository.existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED))
                 .thenReturn(false);
-        when(appointmentRepository.saveAndFlush(any(Appointment.class)))
+        when(appointmentRepository.save(any(Appointment.class)))
                 .thenAnswer(invocation -> {
                     Appointment appointment = invocation.getArgument(0);
                     ReflectionTestUtils.setField(appointment, "id", 21L);
@@ -107,7 +104,7 @@ class AppointmentServiceTest {
         order.verify(slotRepository).findByIdForUpdate(11L);
         order.verify(doctorService).requireById(7L);
         order.verify(appointmentRepository).existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED);
-        order.verify(appointmentRepository).saveAndFlush(savedAppointment.capture());
+        order.verify(appointmentRepository).save(savedAppointment.capture());
         order.verifyNoMoreInteractions();
 
         assertThat(savedAppointment.getValue().getCustomerName()).isEqualTo("张三");
@@ -163,7 +160,7 @@ class AppointmentServiceTest {
         order.verify(slotRepository).findByIdForUpdate(11L);
         order.verify(doctorService).requireById(7L);
         order.verify(appointmentRepository).existsBySlotIdAndStatus(11L, AppointmentStatus.BOOKED);
-        verify(appointmentRepository, never()).saveAndFlush(any(Appointment.class));
+        verify(appointmentRepository, never()).save(any(Appointment.class));
     }
 
     @Test
@@ -210,26 +207,21 @@ class AppointmentServiceTest {
         );
         ReflectionTestUtils.setField(legacy, "id", 21L);
         ReflectionTestUtils.setField(current, "id", 22L);
-        PageRequest repositoryPage = PageRequest.of(1, 2, Sort.by(Sort.Direction.ASC, "id"));
         when(appointmentRepository.search(
                 eq((Long) null),
                 eq(AppointmentStatus.BOOKED), eq("张三"),
                 eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
-                eq(toTime.truncatedTo(ChronoUnit.MICROS)), any(Pageable.class)
-        )).thenReturn(new PageImpl<>(List.of(legacy, current), repositoryPage, 5L));
+                eq(toTime.truncatedTo(ChronoUnit.MICROS)), eq(1), eq(2)
+        )).thenReturn(new StoragePage<>(List.of(legacy, current), 1, 2, 5L));
 
         AppointmentPageResult result = appointmentService.search(ADMIN, query);
 
-        ArgumentCaptor<Pageable> paging = ArgumentCaptor.forClass(Pageable.class);
         verify(appointmentRepository).search(
                 eq((Long) null),
                 eq(AppointmentStatus.BOOKED), eq("张三"),
                 eq(fromTime.truncatedTo(ChronoUnit.MICROS)),
-                eq(toTime.truncatedTo(ChronoUnit.MICROS)), paging.capture()
+                eq(toTime.truncatedTo(ChronoUnit.MICROS)), eq(1), eq(2)
         );
-        assertThat(paging.getValue().getPageNumber()).isEqualTo(1);
-        assertThat(paging.getValue().getPageSize()).isEqualTo(2);
-        assertThat(paging.getValue().getSort()).isEqualTo(Sort.by(Sort.Direction.ASC, "id"));
         verifyNoInteractions(slotRepository, doctorService);
 
         assertThat(result.content()).extracting(AppointmentResult::id).containsExactly(21L, 22L);
@@ -254,21 +246,21 @@ class AppointmentServiceTest {
         UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
         when(slotRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(futureSlot()));
         when(doctorService.requireById(7L)).thenReturn(new DoctorInfo(7L, "王医生"));
-        when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(appointmentRepository.save(any(Appointment.class))).thenAnswer(invocation -> invocation.getArgument(0));
         appointmentService.create(user, new BookAppointmentCommand("代家人预约", 11L));
         ArgumentCaptor<Appointment> saved = ArgumentCaptor.forClass(Appointment.class);
-        verify(appointmentRepository).saveAndFlush(saved.capture());
+        verify(appointmentRepository).save(saved.capture());
         assertThat(saved.getValue().getOwnerId()).isEqualTo(user.id());
     }
 
     @Test
     void shouldRestrictNormalUserSearchBeforeDatabasePagination() {
         UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
-        when(appointmentRepository.search(eq(31L), eq(null), eq(null), eq(null), eq(null), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0L));
+        when(appointmentRepository.search(eq(31L), eq(null), eq(null), eq(null), eq(null), eq(0), eq(20)))
+                .thenReturn(new StoragePage<>(List.of(), 0, 20, 0L));
         AppointmentPageResult result = appointmentService.search(user, new AppointmentQuery(0, 20, null, null, null, null));
         assertThat(result.content()).isEmpty();
-        verify(appointmentRepository).search(eq(31L), eq(null), eq(null), eq(null), eq(null), any(Pageable.class));
+        verify(appointmentRepository).search(eq(31L), eq(null), eq(null), eq(null), eq(null), eq(0), eq(20));
         verifyNoInteractions(slotRepository, doctorService);
     }
 

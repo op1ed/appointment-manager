@@ -30,7 +30,7 @@ flowchart TD
 
 创建预约仍先锁目标时段，再检查占用并插入新预约；它不会锁定已有预约行。改期与取消也会申请相关时段的锁，因此争抢同一目标时段时会协调执行。占用检查使用普通查询，检查到已有预约就返回冲突；不额外锁住其他预约。
 
-改期的第一个数据库读取是加锁的预约查询，之后先取得两个时段的锁，再做普通医生和占用查询。这个顺序避免 MySQL 默认可重复读事务过早建立快照，导致等待锁后继续读到旧占用状态。JPA 的 `@Lock(PESSIMISTIC_WRITE)` 声明与 MySQL 的锁定读语义分别见 [Spring Data JPA](https://docs.spring.io/spring-data/jpa/reference/jpa/locking.html) 和 [MySQL 8.4](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html)。
+改期的第一个数据库读取是加锁的预约查询，之后先取得两个时段的锁，再做普通医生和占用查询。这个顺序避免 MySQL 默认可重复读事务过早建立快照，导致等待锁后继续读到旧占用状态。MyBatis Mapper 明确执行 `SELECT ... FOR UPDATE`；查询必须处于应用服务的同一个 Spring 事务内，提交或回滚后才释放锁。MyBatis 一级缓存设为 `STATEMENT`，锁定读不复用上一次 SQL 的对象结果。数据库的锁定读语义见 [MySQL 8.4](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html)。
 
 数据库的 `active_slot_id` 生成列与唯一索引继续限制一个时段只有一条有效预约。锁组织业务检查与并发行为，数据库约束提供最后一道一致性检查。
 

@@ -3,23 +3,22 @@ package com.op1ed.appointmentmanager.agent.domain;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
-@Entity
-@Table(name = "agent_rescheduling_workflows")
+@TableName("agent_rescheduling_workflows")
 public class ReschedulingWorkflow {
-    @Id @Column(length = 36) private String id;
-    @Column(name = "owner_id", nullable = false) private Long ownerId;
-    @Column(name = "appointment_id", nullable = false) private Long appointmentId;
-    @Column(nullable = false) private long revision;
-    @Column(nullable = false, length = 32) private String status;
-    @Column(name = "next_node", nullable = false, length = 80) private String nextNode;
-    @Column(name = "state_json", nullable = false, columnDefinition = "MEDIUMTEXT") private String stateJson;
-    @Column(name = "created_at", nullable = false) private Instant createdAt;
-    @Column(name = "updated_at", nullable = false) private Instant updatedAt;
+    @TableId(type = IdType.INPUT)
+    private String id;
+    private Long ownerId;
+    private Long appointmentId;
+    private long revision;
+    private String status;
+    private String nextNode;
+    private String stateJson;
+    private Instant createdAt;
+    private Instant updatedAt;
 
     protected ReschedulingWorkflow() { }
     public ReschedulingWorkflow(String id, Long ownerId, Long appointmentId, Instant now) {

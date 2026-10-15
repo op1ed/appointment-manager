@@ -5,46 +5,38 @@ import java.util.List;
 import java.util.Optional;
 
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
+import com.op1ed.appointmentmanager.shared.persistence.MybatisRepository;
+import com.op1ed.appointmentmanager.shared.persistence.StoragePage;
 
-import jakarta.persistence.LockModeType;
+import org.springframework.stereotype.Repository;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+/** 本模块的数据访问入口；Mapper 使用 MyBatis-Plus 执行 SQL。 */
+@Repository
+public class AppointmentSlotRepository extends MybatisRepository<AppointmentSlot> {
 
-public interface AppointmentSlotRepository
-        extends JpaRepository<AppointmentSlot, Long> {
+    private final AppointmentSlotMapper mapper;
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select s from AppointmentSlot s where s.id = :id")
-    Optional<AppointmentSlot> findByIdForUpdate(@Param("id") Long id);
+    public AppointmentSlotRepository(AppointmentSlotMapper mapper) {
+        super(mapper);
+        this.mapper = mapper;
+    }
 
-    List<AppointmentSlot> findByDoctorIdOrderByStartTimeAsc(Long doctorId);
+    public Optional<AppointmentSlot> findByIdForUpdate(Long id) {
+        return mapper.lockById(id);
+    }
 
-    @Query(value = """
-            select s from AppointmentSlot s
-            where s.doctorId = :doctorId and s.startTime > :now
-              and (:fromTime is null or s.startTime >= :fromTime)
-              and (:toTime is null or s.startTime < :toTime)
-              and not exists (select a.id from Appointment a
-                  where a.slotId = s.id and a.status = com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus.BOOKED)
-            """, countQuery = """
-            select count(s) from AppointmentSlot s
-            where s.doctorId = :doctorId and s.startTime > :now
-              and (:fromTime is null or s.startTime >= :fromTime)
-              and (:toTime is null or s.startTime < :toTime)
-              and not exists (select a.id from Appointment a
-                  where a.slotId = s.id and a.status = com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus.BOOKED)
-            """)
-    Page<AppointmentSlot> searchAvailable(@Param("doctorId") Long doctorId, @Param("now") Instant now,
-            @Param("fromTime") Instant fromTime, @Param("toTime") Instant toTime, Pageable pageable);
+    public List<AppointmentSlot> findByDoctorIdOrderByStartTimeAsc(Long doctorId) {
+        return mapper.listByDoctor(doctorId);
+    }
 
-    boolean existsByDoctorIdAndStartTimeLessThanAndEndTimeGreaterThan(
-            Long doctorId,
-            Instant endTime,
-            Instant startTime
-    );
+    public StoragePage<AppointmentSlot> searchAvailable(Long doctorId, Instant now,
+            Instant fromTime, Instant toTime, int page, int size) {
+        return StoragePage.from(mapper.searchAvailable(StoragePage.request(page, size), doctorId, now, fromTime, toTime));
+    }
+
+    public boolean existsByDoctorIdAndStartTimeLessThanAndEndTimeGreaterThan(Long doctorId,
+            Instant endTime, Instant startTime) {
+        return mapper.overlaps(doctorId, endTime, startTime);
+    }
 }

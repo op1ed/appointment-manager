@@ -3,32 +3,24 @@ package com.op1ed.appointmentmanager.appointment.domain;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.BusinessInputs;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-
-@Entity
-@Table(name = "appointment_slots")
+@TableName("appointment_slots")
 public class AppointmentSlot {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
-    @Column(name = "doctor_id", nullable = false)
     private Long doctorId;
 
-    @Column(name = "start_time", nullable = false)
     private Instant startTime;
 
-    @Column(name = "end_time", nullable = false)
     private Instant endTime;
 
     protected AppointmentSlot() {

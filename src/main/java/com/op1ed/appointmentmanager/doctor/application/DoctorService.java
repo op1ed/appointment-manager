@@ -3,8 +3,6 @@ package com.op1ed.appointmentmanager.doctor.application;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.data.domain.Sort;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,7 +33,7 @@ public class DoctorService {
 
     public List<DoctorInfo> findAll() {
         return doctorRepository
-                .findAll(Sort.by(Sort.Direction.ASC, "id"))
+                .findAll()
                 .stream()
                 .map(this::toInfo)
                 .toList();
@@ -50,7 +48,7 @@ public class DoctorService {
         BusinessInputs.requirePageParameters(page, size);
         String filter = name == null ? "" : BusinessInputs.requireName(name, "医生姓名");
         var result = doctorRepository.findByNameContaining(filter,
-                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id"))).map(this::toInfo);
+                page, size).map(this::toInfo);
         return new DoctorPageResult(result.getContent(), result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages(), (long) result.getNumber() + 1 < result.getTotalPages());
     }

@@ -129,8 +129,9 @@ public class AgentActionService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void revokeForWorkflow(UserIdentity caller, String workflowId, String id) {
-        lockWorkflowAction(UserIdentity.requireAuthenticated(caller), workflowId, id).revoke();
-        actions.flush();
+        AgentAction action = lockWorkflowAction(UserIdentity.requireAuthenticated(caller), workflowId, id);
+        action.revoke();
+        actions.update(action);
     }
 
     private AgentAction lockWorkflowAction(UserIdentity user, String workflowId, String id) {
@@ -162,7 +163,7 @@ public class AgentActionService {
         };
         // 有效期在接收确认时判断；业务锁等待不应令一个已接收的确认再次过期。
         action.confirm(writeJson(result), acceptedAt);
-        actions.flush();
+        actions.update(action);
         return toResult(action);
     }
 

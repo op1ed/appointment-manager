@@ -3,16 +3,25 @@ package com.op1ed.appointmentmanager.identity.infrastructure.persistence;
 import java.util.Optional;
 
 import com.op1ed.appointmentmanager.identity.domain.AccessToken;
+import com.op1ed.appointmentmanager.identity.infrastructure.persistence.mapper.AccessTokenMapper;
+import com.op1ed.appointmentmanager.shared.persistence.MybatisRepository;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
 
-public interface AccessTokenRepository extends JpaRepository<AccessToken, Long> {
-    Optional<AccessToken> findByTokenHash(String tokenHash);
+/** 本模块的数据访问入口；Mapper 使用 MyBatis-Plus 执行 SQL。 */
+@Repository
+public class AccessTokenRepository extends MybatisRepository<AccessToken> {
 
-    @Modifying
-    @Query("delete from AccessToken t where t.tokenHash = :tokenHash")
-    void revokeByTokenHash(@Param("tokenHash") String tokenHash);
+    private final AccessTokenMapper mapper;
+
+    public AccessTokenRepository(AccessTokenMapper mapper) {
+        super(mapper);
+        this.mapper = mapper;
+    }
+
+    public Optional<AccessToken> findByTokenHash(String tokenHash) {
+        return mapper.findByTokenHash(tokenHash);
+    }
+
+    public void revokeByTokenHash(String tokenHash) { mapper.revokeByTokenHash(tokenHash); }
 }

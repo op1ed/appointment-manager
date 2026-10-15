@@ -4,58 +4,33 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
-@Entity
-@Table(name = "agent_actions")
+@TableName("agent_actions")
 public class AgentAction {
-    @Id
-    @Column(length = 36)
+    @TableId(type = IdType.INPUT)
     private String id;
 
-    @Column(name = "owner_id", nullable = false)
     private Long ownerId;
 
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(nullable = false, length = 20)
     private AgentActionKind kind;
 
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(nullable = false, length = 20)
     private AgentActionStatus status;
 
-    @Column(name = "appointment_id")
     private Long appointmentId;
-    @Column(name = "customer_name", length = 100)
     private String customerName;
-    @Column(name = "expected_slot_id")
     private Long expectedSlotId;
-    @Column(name = "target_slot_id")
     private Long targetSlotId;
-    @Column(name = "workflow_id", length = 36)
     private String workflowId;
-    @Column(name = "preview_json", nullable = false, columnDefinition = "MEDIUMTEXT")
     private String previewJson;
-    @Column(name = "result_json", columnDefinition = "MEDIUMTEXT")
     private String resultJson;
-    @Column(name = "created_at", nullable = false)
     private Instant createdAt;
-    @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
-    @Column(name = "confirmed_at")
     private Instant confirmedAt;
 
     protected AgentAction() {

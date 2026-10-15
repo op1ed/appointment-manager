@@ -2,50 +2,31 @@ package com.op1ed.appointmentmanager.appointment.domain;
 
 import java.time.Instant;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
-@Entity
-@Table(name = "appointments")
+@TableName("appointments")
 public class Appointment {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
-    @Column(name = "owner_id")
     private Long ownerId;
 
-    @Column(name = "slot_id")
     private Long slotId;
 
-    @Column(name = "customer_name", nullable = false, length = 100)
     private String customerName;
 
-    @Column(name = "doctor_name", nullable = false, length = 100)
     private String doctorName;
 
-    @Column(name = "start_time", nullable = false)
     private Instant startTime;
 
-    @Column(name = "end_time")
     private Instant endTime;
 
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(name = "status", nullable = false, length = 20)
     private AppointmentStatus status = AppointmentStatus.BOOKED;
 
     protected Appointment() {

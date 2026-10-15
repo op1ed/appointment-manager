@@ -78,8 +78,9 @@ public class AgentConversationService {
             throw new BusinessException(ErrorCode.CONFLICT, "会话已收到其他消息，请刷新后重试");
         }
         Instant now = Instant.now();
-        turns.saveAndFlush(new AgentConversationTurn(snapshot.id(), command.requestId(), conversation.nextTurn(now),
+        turns.save(new AgentConversationTurn(snapshot.id(), command.requestId(), conversation.nextTurn(now),
                 command.message(), write(messages), write(response), now));
+        conversations.update(conversation);
         return response;
     }
 

@@ -3,23 +3,17 @@ package com.op1ed.appointmentmanager.agent.domain;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
-@Entity
-@Table(name = "agent_conversations")
+@TableName("agent_conversations")
 public class AgentConversation {
-    @Id @Column(length = 36)
+    @TableId(type = IdType.INPUT)
     private String id;
-    @Column(name = "owner_id", nullable = false)
     private Long ownerId;
-    @Column(nullable = false)
     private long revision;
-    @Column(name = "created_at", nullable = false)
     private Instant createdAt;
-    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
     protected AgentConversation() {

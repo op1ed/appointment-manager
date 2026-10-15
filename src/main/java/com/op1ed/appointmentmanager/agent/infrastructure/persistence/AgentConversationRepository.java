@@ -3,18 +3,27 @@ package com.op1ed.appointmentmanager.agent.infrastructure.persistence;
 import java.util.Optional;
 
 import com.op1ed.appointmentmanager.agent.domain.AgentConversation;
+import com.op1ed.appointmentmanager.agent.infrastructure.persistence.mapper.AgentConversationMapper;
+import com.op1ed.appointmentmanager.shared.persistence.MybatisRepository;
 
-import jakarta.persistence.LockModeType;
+import org.springframework.stereotype.Repository;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+/** 本模块的数据访问入口；Mapper 使用 MyBatis-Plus 执行 SQL。 */
+@Repository
+public class AgentConversationRepository extends MybatisRepository<AgentConversation> {
 
-public interface AgentConversationRepository extends JpaRepository<AgentConversation, String> {
-    Optional<AgentConversation> findByIdAndOwnerId(String id, Long ownerId);
+    private final AgentConversationMapper mapper;
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select c from AgentConversation c where c.id = :id and c.ownerId = :ownerId")
-    Optional<AgentConversation> findByIdAndOwnerIdForUpdate(@Param("id") String id, @Param("ownerId") Long ownerId);
+    public AgentConversationRepository(AgentConversationMapper mapper) {
+        super(mapper);
+        this.mapper = mapper;
+    }
+
+    public Optional<AgentConversation> findByIdAndOwnerId(String id, Long ownerId) {
+        return mapper.findOwned(id, ownerId);
+    }
+
+    public Optional<AgentConversation> findByIdAndOwnerIdForUpdate(String id, Long ownerId) {
+        return mapper.lockOwned(id, ownerId);
+    }
 }

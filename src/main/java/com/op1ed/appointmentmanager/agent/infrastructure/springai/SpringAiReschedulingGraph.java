@@ -34,7 +34,7 @@ public class SpringAiReschedulingGraph implements ReschedulingGraph {
     private final WorkflowJson json;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public SpringAiReschedulingGraph(JpaWorkflowCheckpointSaver saver, ReschedulingWorkflowOperations operations,
+    public SpringAiReschedulingGraph(MybatisWorkflowCheckpointSaver saver, ReschedulingWorkflowOperations operations,
             WorkflowJson json) throws Exception {
         this((BaseCheckpointSaver) saver, operations, json);
     }

@@ -3,31 +3,20 @@ package com.op1ed.appointmentmanager.agent.domain;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
-@Entity
-@Table(name = "agent_conversation_turns")
+@TableName("agent_conversation_turns")
 public class AgentConversationTurn {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
-    @Column(name = "conversation_id", nullable = false, length = 36)
     private String conversationId;
-    @Column(name = "request_id", nullable = false, length = 36)
     private String requestId;
-    @Column(name = "turn_number", nullable = false)
     private long turnNumber;
-    @Column(name = "user_message", nullable = false, length = 2000)
     private String userMessage;
-    @Column(name = "messages_json", nullable = false, columnDefinition = "MEDIUMTEXT")
     private String messagesJson;
-    @Column(name = "response_json", nullable = false, columnDefinition = "MEDIUMTEXT")
     private String responseJson;
-    @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
     protected AgentConversationTurn() {

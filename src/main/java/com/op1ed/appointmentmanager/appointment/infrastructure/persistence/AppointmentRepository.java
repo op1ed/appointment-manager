@@ -6,59 +6,41 @@ import java.util.Optional;
 
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.shared.persistence.MybatisRepository;
+import com.op1ed.appointmentmanager.shared.persistence.StoragePage;
 
-import jakarta.persistence.LockModeType;
+import org.springframework.stereotype.Repository;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+/** 本模块的数据访问入口；Mapper 使用 MyBatis-Plus 执行 SQL。 */
+@Repository
+public class AppointmentRepository extends MybatisRepository<Appointment> {
 
-public interface AppointmentRepository
-        extends JpaRepository<Appointment, Long> {
+    private final AppointmentMapper mapper;
 
-    Optional<Appointment> findByIdAndOwnerId(Long id, Long ownerId);
+    public AppointmentRepository(AppointmentMapper mapper) {
+        super(mapper);
+        this.mapper = mapper;
+    }
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select a from Appointment a where a.id = :id and (:ownerId is null or a.ownerId = :ownerId)")
-    Optional<Appointment> findVisibleByIdForUpdate(@Param("id") Long id, @Param("ownerId") Long ownerId);
+    public Optional<Appointment> findByIdAndOwnerId(Long id, Long ownerId) {
+        return mapper.findOwned(id, ownerId);
+    }
 
-    boolean existsBySlotIdAndStatus(
-            Long slotId,
-            AppointmentStatus status
-    );
+    public Optional<Appointment> findVisibleByIdForUpdate(Long id, Long ownerId) {
+        return mapper.lockVisible(id, ownerId);
+    }
 
-    List<Appointment> findBySlotIdInAndStatus(
-            List<Long> slotIds,
-            AppointmentStatus status
-    );
+    public boolean existsBySlotIdAndStatus(Long slotId, AppointmentStatus status) {
+        return mapper.existsOccupied(slotId, status);
+    }
 
-    @Query(
-            value = """
-                    select a from Appointment a
-                    where (:ownerId is null or a.ownerId = :ownerId)
-                      and (:status is null or a.status = :status)
-                      and (:customerName is null or a.customerName = :customerName)
-                      and (:fromTime is null or a.startTime >= :fromTime)
-                      and (:toTime is null or a.startTime < :toTime)
-                    """,
-            countQuery = """
-                    select count(a) from Appointment a
-                    where (:ownerId is null or a.ownerId = :ownerId)
-                      and (:status is null or a.status = :status)
-                      and (:customerName is null or a.customerName = :customerName)
-                      and (:fromTime is null or a.startTime >= :fromTime)
-                      and (:toTime is null or a.startTime < :toTime)
-                    """
-    )
-    Page<Appointment> search(
-            @Param("ownerId") Long ownerId,
-            @Param("status") AppointmentStatus status,
-            @Param("customerName") String customerName,
-            @Param("fromTime") Instant fromTime,
-            @Param("toTime") Instant toTime,
-            Pageable pageable
-    );
+    public List<Appointment> findBySlotIdInAndStatus(List<Long> slotIds, AppointmentStatus status) {
+        return slotIds.isEmpty() ? List.of() : mapper.findBySlots(slotIds, status);
+    }
+
+    public StoragePage<Appointment> search(Long ownerId, AppointmentStatus status, String customerName,
+            Instant fromTime, Instant toTime, int page, int size) {
+        return StoragePage.from(mapper.search(StoragePage.request(page, size), ownerId, status, customerName, fromTime, toTime));
+    }
 }

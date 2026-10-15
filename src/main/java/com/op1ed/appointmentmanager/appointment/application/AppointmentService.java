@@ -18,10 +18,8 @@ import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
 import com.op1ed.appointmentmanager.shared.error.BusinessInputs;
 import com.op1ed.appointmentmanager.shared.error.ErrorCode;
+import com.op1ed.appointmentmanager.shared.persistence.StoragePage;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -87,23 +85,20 @@ public class AppointmentService {
                 slot.getEndTime()
         );
 
-        Appointment saved = appointmentRepository.saveAndFlush(appointment);
+        Appointment saved = appointmentRepository.save(appointment);
         recordEvent(saved, user, AppointmentAction.BOOKED, null, saved.getSlotId());
         return toResult(saved);
     }
 
     public AppointmentPageResult search(UserIdentity caller, AppointmentQuery query) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
-        PageRequest pageable = PageRequest.of(
-                query.page(), query.size(), Sort.by(Sort.Direction.ASC, "id")
-        );
-        Page<AppointmentResult> page = appointmentRepository.search(
+        StoragePage<AppointmentResult> page = appointmentRepository.search(
                 user.administrator() ? null : user.id(),
                 query.status(),
                 query.customerName(),
                 query.fromTime(),
                 query.toTime(),
-                pageable
+                query.page(), query.size()
         ).map(this::toResult);
 
         // 用 long 计算页号加一，避免极大页号发生整数溢出。
@@ -154,7 +149,8 @@ public class AppointmentService {
                     }
 
                     appointment.cancel();
-                    appointmentRepository.flush();
+                    // MyBatis 需要显式更新，预约与操作记录仍在同一个事务中提交。
+                    appointmentRepository.update(appointment);
                     recordEvent(appointment, user, AppointmentAction.CANCELLED, appointment.getSlotId(), null);
                     return toResult(appointment);
                 });
@@ -194,7 +190,7 @@ public class AppointmentService {
                 throw new BusinessException(ErrorCode.CONFLICT, "目标时段已经被预约");
             }
             appointment.rescheduleTo(target, doctor.name(), Instant.now());
-            appointmentRepository.flush();
+            appointmentRepository.update(appointment);
             recordEvent(appointment, user, AppointmentAction.RESCHEDULED, originalSlotId, target.getId());
             return toResult(appointment);
         });
@@ -203,8 +199,8 @@ public class AppointmentService {
     public Optional<AppointmentHistoryPageResult> history(UserIdentity caller, long id, AppointmentHistoryQuery query) {
         UserIdentity user = UserIdentity.requireAuthenticated(caller);
         return findVisible(user, id).map(appointment -> {
-            Page<AppointmentHistoryEventResult> page = eventRepository.findByAppointmentId(appointment.getId(),
-                    PageRequest.of(query.page(), query.size(), Sort.by(Sort.Direction.ASC, "id")))
+            StoragePage<AppointmentHistoryEventResult> page = eventRepository.findByAppointmentId(appointment.getId(),
+                    query.page(), query.size())
                     .map(event -> new AppointmentHistoryEventResult(event.getId(), event.getActorId(), event.getAction(),
                             event.getFromSlotId(), event.getToSlotId(), event.getOccurredAt()));
             return new AppointmentHistoryPageResult(page.getContent(), page.getNumber(), page.getSize(),

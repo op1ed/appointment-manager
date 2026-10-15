@@ -3,43 +3,25 @@ package com.op1ed.appointmentmanager.appointment.domain;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
-@Entity
-@Table(name = "appointment_events")
+@TableName("appointment_events")
 public class AppointmentEvent {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
-    @Column(name = "appointment_id", nullable = false)
     private Long appointmentId;
 
-    @Column(name = "actor_id", nullable = false)
     private Long actorId;
 
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(nullable = false, length = 20)
     private AppointmentAction action;
 
-    @Column(name = "from_slot_id")
     private Long fromSlotId;
 
-    @Column(name = "to_slot_id")
     private Long toSlotId;
 
-    @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
 
     protected AppointmentEvent() {

@@ -10,7 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.op1ed.appointmentmanager.agent.application.AgentActionService;
 import com.op1ed.appointmentmanager.agent.application.workflow.*;
 import com.op1ed.appointmentmanager.agent.infrastructure.persistence.*;
-import com.op1ed.appointmentmanager.agent.infrastructure.springai.JpaWorkflowCheckpointSaver;
+import com.op1ed.appointmentmanager.agent.infrastructure.springai.MybatisWorkflowCheckpointSaver;
 import com.op1ed.appointmentmanager.agent.infrastructure.springai.SpringAiReschedulingGraph;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.support.AgentApiFixtures;
@@ -30,7 +30,7 @@ import static org.mockito.Mockito.*;
 class ReschedulingWorkflowControllerTest extends AgentApiFixtures {
     private static final String ROOT = "/api/agent/rescheduling-workflows";
     @MockitoSpyBean private SpringAiReschedulingGraph graph;
-    @Autowired private JpaWorkflowCheckpointSaver saver;
+    @Autowired private MybatisWorkflowCheckpointSaver saver;
     @Autowired private ReschedulingWorkflowOperations operations;
     @Autowired private WorkflowJson workflowJson;
     @Autowired private ReschedulingWorkflowRepository workflows;
@@ -283,7 +283,7 @@ class ReschedulingWorkflowControllerTest extends AgentApiFixtures {
     @Test void shouldResumeDatabaseCheckpointWithEntirelyNewGraphSaverAndService() throws Exception {
         var slots = createSlots(2); var owner = normalUser(); var appointment = book(owner.client(), slots.get(0).id());
         var started = start(owner.client(), appointment.id(), slots.get(0).startTime().toString(), slots.get(1).endTime().toString());
-        var freshSaver = new JpaWorkflowCheckpointSaver(checkpoints(), json);
+        var freshSaver = new MybatisWorkflowCheckpointSaver(checkpoints(), json);
         var freshGraph = new SpringAiReschedulingGraph(freshSaver, operations, workflowJson);
         var freshTransactions = new ReschedulingWorkflowTransactions(workflows, requests, freshGraph, operations, actions, workflowJson);
         var identity = new UserIdentity(owner.identity().id(), owner.identity().username(), owner.identity().displayName(), false);

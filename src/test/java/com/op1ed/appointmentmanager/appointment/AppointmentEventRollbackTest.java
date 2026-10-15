@@ -31,7 +31,7 @@ class AppointmentEventRollbackTest extends AppointmentApiFixtures {
     }
 
     @Test
-    void shouldRestoreOriginalSlotAfterFlushedRescheduleWhenEventCannotBeSaved() {
+    void shouldRestoreOriginalSlotAfterRescheduleSqlWhenEventCannotBeSaved() {
         var slots = createSlots(2);
         var original = book(restTemplate, slots.get(0).id());
         failEventSave();
@@ -55,7 +55,7 @@ class AppointmentEventRollbackTest extends AppointmentApiFixtures {
     }
 
     private void failEventSave() {
-        // 让失败发生在业务 SQL 已 flush 之后，验证真实事务会撤销这些数据库变更。
+        // 让失败发生在业务 SQL 已执行之后，验证真实事务会撤销这些数据库变更。
         doThrow(new IllegalStateException("Simulated appointment event storage failure"))
                 .when(eventRepository).save(any(AppointmentEvent.class));
     }

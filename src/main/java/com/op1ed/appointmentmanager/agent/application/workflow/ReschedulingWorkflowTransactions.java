@@ -42,7 +42,7 @@ public class ReschedulingWorkflowTransactions {
         var previous = replay(user, command.requestId(), null, "START", command);
         if (previous.isPresent()) { return previous.get(); }
         operations.validateStart(user, command);
-        var workflow = workflows.saveAndFlush(new ReschedulingWorkflow(UUID.randomUUID().toString(), user.id(),
+        var workflow = workflows.save(new ReschedulingWorkflow(UUID.randomUUID().toString(), user.id(),
                 command.appointmentId(), Instant.now()));
         return store(user, workflow, command.requestId(), "START", command, graph.start(user, workflow.getId(), command));
     }
@@ -97,9 +97,9 @@ public class ReschedulingWorkflowTransactions {
     private ReschedulingWorkflowView store(UserIdentity user, ReschedulingWorkflow workflow, String requestId,
             String kind, Object command, ReschedulingGraph.GraphResult result) {
         workflow.advance(result.stateJson(), result.status(), result.nextNode(), Instant.now());
-        workflows.flush();
+        workflows.update(workflow);
         var response = view(user, workflow);
-        requests.saveAndFlush(new WorkflowRequest(user.id(), requestId, workflow.getId(), kind, json.write(command), json.write(response)));
+        requests.save(new WorkflowRequest(user.id(), requestId, workflow.getId(), kind, json.write(command), json.write(response)));
         return response;
     }
 

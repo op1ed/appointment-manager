@@ -2,6 +2,39 @@
 
 本轮解决两个问题：请求来自哪个账号，以及这个账号能操作哪些记录。预约人姓名仍是业务资料，不能作为登录身份或权限依据。
 
+数据库访问现已改为 MyBatis-Plus。身份业务规则不变，`IdentityService` 通过本模块 Repository 调用 Mapper；新增账号和令牌立即执行 INSERT。可结合 [MyBatis-Plus 阅读说明](mybatis-plus-migration.md) 从熟悉的注册流程向下追踪。
+
+## 本批阅读：3A，注册与登录
+
+医生模块已经读过，接下来先看账号如何创建、登录后怎样取得令牌。身份部分分成两批：**3A 是注册与登录，3B 再看后续请求的令牌验证、退出和权限**。本次已给下面五个核心文件补上中文注释。
+
+按两条具体请求追踪即可：
+
+```text
+注册 POST /api/auth/register
+  → RegisterRequest.toCommand()
+  → RegisterUserCommand 校验并整理参数
+  → IdentityService.register 检查重名、散列密码、保存普通账号
+  → 返回 UserResponse（注册完成，尚未发登录令牌）
+
+登录 POST /api/auth/login
+  → LoginRequest.toCommand()
+  → LoginCommand 校验并整理参数
+  → IdentityService.login 查账号、校验密码、创建令牌记录
+  → 返回 LoginResponse（原始令牌、Bearer 类型、过期时间、用户资料）
+```
+
+阅读顺序：
+
+1. [AuthController](../src/main/java/com/op1ed/appointmentmanager/identity/web/AuthController.java)：先读 register、login，沿用医生 Controller 的“接收请求 → 调服务 → 转换响应”思路。
+2. [RegisterUserCommand](../src/main/java/com/op1ed/appointmentmanager/identity/application/RegisterUserCommand.java) 与 [LoginCommand](../src/main/java/com/op1ed/appointmentmanager/identity/application/LoginCommand.java)：看 record 构造时怎样检查输入；IdentityInputs 是两者复用的校验方法。
+3. [IdentityService](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java)：读构造方法、register、login 和 toIdentity，注意每一步的数据是什么。
+4. [AccessTokens](../src/main/java/com/op1ed/appointmentmanager/identity/application/AccessTokens.java)：跟着 login 读 generate、hash，理解发给客户端的令牌和保存到数据库的散列之间的关系。
+
+碰到 UserAccount、AccessToken 时，先像读 Doctor 实体一样看字段：前者保存账号与密码散列，后者保存账号 id、令牌散列和过期时间。Request/Response 的转换也可按医生模块的同类对象理解。
+
+本批读完应能说明三件事：注册为什么保存密码散列；登录为什么用 matches 验证密码；登录响应中的原始令牌与数据库 token_hash 分别保存在哪里。下面的请求认证与权限细节是后续 3B 的阅读内容。
+
 ## 账号和角色
 
 `identity` 模块拥有账号和令牌表，对外提供 `UserIdentity`。公开注册永远创建 `USER`，客户端传入的角色字段不会赋予管理员权限。`ADMIN` 由服务器初始化配置创建。
