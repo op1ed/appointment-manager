@@ -16,7 +16,7 @@ public record CreateAppointmentRequest(
         @Positive
         Long slotId
 ) {
-    public BookAppointmentCommand toCommand() {
-        return new BookAppointmentCommand(customerName, slotId);
+    public BookAppointmentCommand toCommand(String requestId) {
+        return new BookAppointmentCommand(customerName, slotId, requestId);
     }
 }

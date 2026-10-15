@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.op1ed.appointmentmanager.appointment.application.impl.AppointmentServiceImpl;
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentAction;
@@ -12,6 +13,7 @@ import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentEventMapper;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentBookingRequestMapper;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
 import com.op1ed.appointmentmanager.doctor.application.DoctorService;
@@ -48,11 +50,13 @@ class AppointmentRescheduleServiceTest {
     @Mock private AppointmentSlotMapper slots;
     @Mock private DoctorService doctors;
     @Mock private AppointmentEventMapper events;
+    @Mock private AppointmentBookingRequestMapper bookingRequests;
     private AppointmentService service;
 
     @BeforeEach
     void setUp() {
-        service = new AppointmentServiceImpl(appointments, slots, doctors, events);
+        service = new AppointmentServiceImpl(appointments, slots, doctors, events,
+                bookingRequests, new ObjectMapper().findAndRegisterModules());
     }
 
     @ParameterizedTest

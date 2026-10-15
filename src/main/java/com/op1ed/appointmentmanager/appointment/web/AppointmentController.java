@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,10 +43,12 @@ public class AppointmentController {
     @PostMapping
     public ResponseEntity<AppointmentResponse> createAppointment(
             @AuthenticationPrincipal UserIdentity caller,
-            @Valid @RequestBody CreateAppointmentRequest request
+            @Valid @RequestBody CreateAppointmentRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String requestId
     ) {
+        // 请求头只是把客户端的请求 ID 传入业务层；真正的去重由数据库事务保证。
         AppointmentResponse appointment =
-                AppointmentResponse.from(appointmentService.create(caller, request.toCommand()));
+                AppointmentResponse.from(appointmentService.create(caller, request.toCommand(requestId)));
 
         URI location = URI.create(
                 "/api/appointments/" + appointment.id()

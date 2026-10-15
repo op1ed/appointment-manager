@@ -12,7 +12,7 @@ import com.op1ed.appointmentmanager.identity.application.UserIdentity;
  */
 public interface AppointmentService {
 
-    /** 为当前登录账号创建预约，同时保存创建记录。 */
+    /** 为当前登录账号创建预约；提供 requestId 时，相同账号与输入的重试返回首次成功结果。 */
     AppointmentResult create(UserIdentity caller, BookAppointmentCommand command);
 
     /** 按身份可见范围与筛选条件分页查询预约。 */

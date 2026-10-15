@@ -7,11 +7,13 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.op1ed.appointmentmanager.appointment.application.impl.AppointmentServiceImpl;
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
+import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentBookingRequestMapper;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentEventMapper;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
 import com.op1ed.appointmentmanager.doctor.application.DoctorInfo;
@@ -62,12 +64,16 @@ class AppointmentServiceTest {
     @Mock
     private AppointmentEventMapper eventMapper;
 
+    @Mock
+    private AppointmentBookingRequestMapper bookingRequestMapper;
+
     private AppointmentService appointmentService;
 
     @BeforeEach
     void setUp() {
         appointmentService = new AppointmentServiceImpl(
-                appointmentMapper, slotMapper, doctorService, eventMapper
+                appointmentMapper, slotMapper, doctorService, eventMapper,
+                bookingRequestMapper, new ObjectMapper().findAndRegisterModules()
         );
     }
 

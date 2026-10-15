@@ -1,4 +1,4 @@
-"""Verify appointments, events, Agent actions, and persistence after restart.
+"""Verify appointments, booking retries, events, and Agent persistence after restart.
 
 Run on the Ubuntu server from the project checkout:
     sudo python3 scripts/verify_persistence.py
@@ -22,11 +22,13 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 ACCESS_TOKEN = None
 
 
-def request_json(path, method="GET", body=None, expected_status=200):
+def request_json(path, method="GET", body=None, expected_status=200, idempotency_key=None):
     data = None if body is None else json.dumps(body).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if ACCESS_TOKEN is not None:
         headers["Authorization"] = "Bearer " + ACCESS_TOKEN
+    if idempotency_key is not None:
+        headers["Idempotency-Key"] = idempotency_key
     request = Request(
         BASE_URL + path,
         data=data,
@@ -161,15 +163,19 @@ def main():
     slot_id = require_positive_id(slot, "slot")
     check_slot_availability(doctor_id, slot_id, True)
 
+    booking_key = str(uuid4())
+    booking_body = {"customerName": "部署测试用户", "slotId": slot_id}
     created = request_json(
         "/api/appointments",
         method="POST",
-        body={
-            "customerName": "部署测试用户",
-            "slotId": slot_id,
-        },
+        body=booking_body,
         expected_status=201,
+        idempotency_key=booking_key,
     )
+    retried = request_json("/api/appointments", method="POST", body=booking_body,
+                           expected_status=201, idempotency_key=booking_key)
+    if retried != created:
+        raise RuntimeError("Retrying a booking must replay its first successful response.")
 
     appointment_id = require_positive_id(created, "appointment")
     if created.get("status") != "BOOKED":
@@ -182,6 +188,8 @@ def main():
     before_restart = request_json(detail_path)
     if before_restart != created:
         raise RuntimeError("The saved appointment differs from the create response.")
+    if request_json(detail_path + "/history")["totalElements"] != 1:
+        raise RuntimeError("Booking retries duplicated operation records.")
 
     cancelled = request_json(detail_path + "/cancel", method="POST")
     expected_cancelled = dict(created, status="CANCELLED")
@@ -303,6 +311,11 @@ def main():
     wait_until_ready()
     if request_json("/api/auth/me") != logged_in_user:
         raise RuntimeError("The persisted login token stopped working after restarting the app.")
+    # 原预约已经取消：同一个创建请求仍重放首次 BOOKED 快照，不重新占用时段。
+    replayed = request_json("/api/appointments", method="POST", body=booking_body,
+                            expected_status=201, idempotency_key=booking_key)
+    if replayed != created:
+        raise RuntimeError("The original booking response could not be replayed after restarting the app.")
     after_restart = request_json(detail_path)
     if after_restart != before_restart:
         raise RuntimeError("The appointment changed after restarting the app.")
@@ -339,7 +352,7 @@ def main():
         raise RuntimeError("Graph confirmation retries duplicated operation records.")
 
     print(
-        f"PASS: appointment {replacement_id}, login, events, Agent actions, conversation, and paused Graph survived restart and resumed.",
+        f"PASS: appointment {replacement_id}, booking retries, login, events, Agent actions, conversation, and paused Graph survived restart and resumed.",
         flush=True,
     )
 
