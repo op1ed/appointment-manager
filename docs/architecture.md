@@ -28,12 +28,14 @@ com.op1ed.appointmentmanager
 ├── doctor
 │   ├── web
 │   ├── application
+│   │   └── impl
 │   ├── domain
 │   └── infrastructure
 │       └── persistence
 ├── appointment
 │   ├── web
 │   ├── application
+│   │   └── impl
 │   ├── domain
 │   └── infrastructure
 │       └── persistence
@@ -41,6 +43,7 @@ com.op1ed.appointmentmanager
 │   ├── web
 │   │   └── security
 │   ├── application
+│   │   └── impl
 │   ├── domain
 │   └── infrastructure
 │       ├── persistence
@@ -62,7 +65,8 @@ com.op1ed.appointmentmanager
 | 层 | 负责什么 | 预约中的例子 |
 | --- | --- | --- |
 | `web` | HTTP 路径、JSON、输入格式校验、响应转换 | Controller、请求和响应 DTO |
-| `application` | 一次业务用例的流程、业务输入、事务边界 | 创建预约、发布时段、取消与改期、记录业务操作 |
+| `application` | 对外业务接口、业务输入输出 | AppointmentService、Command、Query、Result |
+| `application.impl` | 一次业务用例的流程、事务边界 | AppointmentServiceImpl 中的创建、取消、改期与记录保存 |
 | `domain` | 业务对象及其自身行为 | 预约、时段、状态、改期条件、操作记录 |
 | `infrastructure.persistence.mapper` | 具体数据库访问 | MyBatis-Plus Mapper，提供通用读写与显式 SQL |
 
@@ -72,7 +76,7 @@ com.op1ed.appointmentmanager
 
 应用服务负责资源存在、时段有效和占用情况等业务校验。HTTP 格式校验是入口的便利，业务规则仍要保护未来的 Agent 等调用入口。
 
-分页查询使用 `AppointmentQuery` 表达查询条件。`AppointmentService.search` 直接调用本模块 Mapper，在数据库中分页和统计；应用服务用 `StoragePage` 统一转换页号和分页结果，再返回 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。分页插件生成 count 与 LIMIT SQL，只查询当前页。
+分页查询使用 `AppointmentQuery` 表达查询条件。调用方使用 `AppointmentService.search`，由 `AppointmentServiceImpl` 调用本模块 Mapper，在数据库中分页和统计；实现类用 `StoragePage` 统一转换页号和分页结果，再返回 `AppointmentPageResult`，由 `web` 转换成 `AppointmentPageResponse`。分页插件生成 count 与 LIMIT SQL，只查询当前页。
 
 身份验证在 `identity.web.security` 适配器中完成：Spring Security 从 Bearer 令牌取得登录身份，Controller 收到普通 record `UserIdentity`，把它显式传给应用服务。应用服务不读取 `SecurityContextHolder`，也不依赖 HTTP 登录对象。身份模块内部验证账号和令牌，其他模块只使用其 `application` 入口。
 
@@ -81,9 +85,9 @@ com.op1ed.appointmentmanager
 这是轻量分层：
 
 - 业务模型使用 MyBatis-Plus 的 `@TableName`、`@TableId`，一套对象承担业务表达与表映射。
-- 应用服务直接调用本模块 Mapper；通用 SQL 由 `BaseMapper` 提供，筛选与行锁在 Mapper 中明确声明。
+- 医生、身份、时段、预约的 Service 接口声明业务能力，impl 包中的实现类直接调用本模块 Mapper；通用 SQL 由 `BaseMapper` 提供，筛选与行锁在 Mapper 中明确声明。
 - 新增调用 `insert`，修改已有对象后调用 `updateById` 并检查影响行数，事务由应用服务的 `@Transactional` 控制。
-- 不为每个服务建立只有一个实现的接口。
+- Controller 与跨模块调用依赖业务接口；内部协调类、工具类继续按职责组织。具体对应关系见 [Service 接口与实现](service-and-implementation.md)。
 - 不增加 Maven 子模块、事件总线或远程服务调用。
 
 因此，这个项目没有宣称领域层完全独立于框架，也没有完整实现依赖倒置。先把真实职责、业务规则和事务边界建立清楚，后续需求需要替换数据库或分离模型时，再增加相应接口与映射。
@@ -115,12 +119,12 @@ flowchart TD
 遵循以下规则：
 
 1. `web` 调用 `application`，应用服务不依赖 Controller 或 HTTP DTO。
-2. 应用服务可以访问本模块的领域模型和 Mapper。
-3. `appointment` 通过 `doctor.application.DoctorService` 使用医生能力，拿到普通 record `DoctorInfo`；不导入医生实体或 Mapper。
+2. 应用服务实现可以访问本模块的领域模型和 Mapper；调用方通过接口使用业务能力。
+3. `appointment` 通过 `doctor.application.DoctorService` 使用医生能力，拿到普通 record `DoctorInfo`；不导入医生实体、Mapper 或 impl 包。
 4. `doctor` 不依赖 `appointment`，避免业务模块循环依赖。
 5. `domain` 不调用 Controller、应用服务或其他模块的 Mapper。
 6. 业务代码使用 `shared.error` 中的业务异常，`shared.web` 把错误转换为 HTTP ProblemDetail。
-7. `appointment` 和 `doctor` 只通过 `identity.application` 使用身份能力；身份模块不依赖预约或医生业务。
+7. `appointment` 和 `doctor` 只通过 `identity.application` 的接口与业务对象使用身份能力，不导入 impl 包；身份模块不依赖预约或医生业务。
 8. 管理员初始化位于 `identity.infrastructure.bootstrap`，是调用应用服务的启动适配器；Mapper 不依赖应用层。
 9. Agent 工具调用业务应用服务，共用规则、权限与事务，不直接操作其他模块的 Mapper。调用身份由服务端注入，不能由模型生成账号 ID 或管理员标记。医生、预约和身份模块不依赖 Agent。
 
@@ -245,10 +249,10 @@ GET /api/appointments 的查询参数
 ## 建议的阅读顺序
 
 1. 从预约 Controller 看输入输出，再看 `BookAppointmentCommand` 和 `AppointmentResult`，理解入口与业务的交接；对照列表接口的 [AppointmentQuery](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentQuery.java)、[AppointmentPageResult](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentPageResult.java) 与 [AppointmentPageResponse](../src/main/java/com/op1ed/appointmentmanager/appointment/web/dto/AppointmentPageResponse.java)，区分创建输入与查询输入。
-2. 阅读 [预约应用服务](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java) 的创建方法，沿着事务、行锁、占用查询、保存的顺序画出流程。
+2. 先看 [预约服务接口](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java)，再阅读 [预约服务实现](../src/main/java/com/op1ed/appointmentmanager/appointment/application/impl/AppointmentServiceImpl.java) 的创建方法，沿着事务、行锁、占用查询、保存的顺序画出流程。
 3. 阅读 `Appointment`、`AppointmentSlot`、`AppointmentStatus`，区分对象自身行为与跨对象协调。
 4. 阅读本模块 Mapper 与 V3 迁移，理解代码检查和数据库约束各自保证什么；再沿着列表查询阅读筛选条件如何组合、分页如何交给数据库执行。
-5. 阅读 [医生应用服务](../src/main/java/com/op1ed/appointmentmanager/doctor/application/DoctorService.java)，重点看普通读取与 `lockForScheduling` 的区别。
+5. 阅读 [医生服务实现](../src/main/java/com/op1ed/appointmentmanager/doctor/application/impl/DoctorServiceImpl.java)，重点看普通读取与 `lockForScheduling` 的区别。
 6. 阅读排班创建和取消逻辑，检查锁在什么时候获取、在什么时候释放。
 7. 阅读 [统一异常处理](../src/main/java/com/op1ed/appointmentmanager/shared/web/GlobalExceptionHandler.java)，跟踪一个业务冲突如何变成 HTTP 响应。
 8. 最后阅读集成测试与架构测试，理解它们分别检查行为和依赖边界。

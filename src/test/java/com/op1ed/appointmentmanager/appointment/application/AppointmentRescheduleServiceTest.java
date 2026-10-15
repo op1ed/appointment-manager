@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import com.op1ed.appointmentmanager.appointment.application.impl.AppointmentServiceImpl;
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentAction;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentEvent;
@@ -51,7 +52,7 @@ class AppointmentRescheduleServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AppointmentService(appointments, slots, doctors, events);
+        service = new AppointmentServiceImpl(appointments, slots, doctors, events);
     }
 
     @ParameterizedTest

@@ -2,7 +2,7 @@
 
 本轮解决两个问题：请求来自哪个账号，以及这个账号能操作哪些记录。预约人姓名仍是业务资料，不能作为登录身份或权限依据。
 
-数据库访问现已改为 MyBatis-Plus。身份业务规则不变，`IdentityService` 直接调用本模块 Mapper；新增账号和令牌立即执行 INSERT。可结合 [MyBatis-Plus 阅读说明](mybatis-plus-migration.md) 从熟悉的注册流程向下追踪。
+数据库访问现已改为 MyBatis-Plus。调用方依赖 `IdentityService` 接口，`IdentityServiceImpl` 完成业务规则并直接调用本模块 Mapper；新增账号和令牌立即执行 INSERT。可结合 [Service 接口与实现](service-and-implementation.md) 和 [MyBatis-Plus 阅读说明](mybatis-plus-migration.md) 从熟悉的注册流程向下追踪。
 
 ## 本批阅读：3A，注册与登录
 
@@ -14,13 +14,13 @@
 注册 POST /api/auth/register
   → RegisterRequest.toCommand()
   → RegisterUserCommand 校验并整理参数
-  → IdentityService.register 检查重名、散列密码、保存普通账号
+  → IdentityService 接口 → IdentityServiceImpl.register 检查重名、散列密码、保存普通账号
   → 返回 UserResponse（注册完成，尚未发登录令牌）
 
 登录 POST /api/auth/login
   → LoginRequest.toCommand()
   → LoginCommand 校验并整理参数
-  → IdentityService.login 查账号、校验密码、创建令牌记录
+  → IdentityService 接口 → IdentityServiceImpl.login 查账号、校验密码、创建令牌记录
   → 返回 LoginResponse（原始令牌、Bearer 类型、过期时间、用户资料）
 ```
 
@@ -28,7 +28,7 @@
 
 1. [AuthController](../src/main/java/com/op1ed/appointmentmanager/identity/web/AuthController.java)：先读 register、login，沿用医生 Controller 的“接收请求 → 调服务 → 转换响应”思路。
 2. [RegisterUserCommand](../src/main/java/com/op1ed/appointmentmanager/identity/application/RegisterUserCommand.java) 与 [LoginCommand](../src/main/java/com/op1ed/appointmentmanager/identity/application/LoginCommand.java)：看 record 构造时怎样检查输入；IdentityInputs 是两者复用的校验方法。
-3. [IdentityService](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java)：读构造方法、register、login 和 toIdentity，注意每一步的数据是什么。
+3. 先看 [IdentityService 接口](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java) 的输入输出，再到 [IdentityServiceImpl](../src/main/java/com/op1ed/appointmentmanager/identity/application/impl/IdentityServiceImpl.java) 读构造方法、register、login 和 toIdentity，注意每一步的数据是什么。
 4. [AccessTokens](../src/main/java/com/op1ed/appointmentmanager/identity/application/AccessTokens.java)：跟着 login 读 generate、hash，理解发给客户端的令牌和保存到数据库的散列之间的关系。
 
 碰到 UserAccount、AccessToken 时，先像读 Doctor 实体一样看字段：前者保存账号与密码散列，后者保存账号 id、令牌散列和过期时间。Request/Response 的转换也可按医生模块的同类对象理解。
@@ -46,7 +46,7 @@
 ## 登录与退出
 
 1. `LoginRequest` 转为 `LoginCommand`，先校验输入。
-2. `IdentityService.login` 读取账号并用 PasswordEncoder 校验密码。未知账号也执行一次密码散列校验，并与错误密码返回相同错误。
+2. `IdentityServiceImpl.login` 读取账号并用 PasswordEncoder 校验密码。未知账号也执行一次密码散列校验，并与错误密码返回相同错误。
 3. 生成 32 字节安全随机数，转换为 URL 安全的访问令牌。
 4. 数据库保存令牌的 SHA-256 散列、账号 ID、UTC 过期时间。登录响应返回原始令牌、Bearer 类型、过期时间与用户资料。
 5. 退出时删除当前令牌的散列记录，其他登录令牌继续有效。
@@ -100,9 +100,9 @@ Controller 用 `@AuthenticationPrincipal` 取得 `UserIdentity`，再显式传�
 ## 阅读顺序
 
 1. [UserIdentity](../src/main/java/com/op1ed/appointmentmanager/identity/application/UserIdentity.java)：业务层需要的身份信息与管理员检查。
-2. [IdentityService](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java)：注册、密码校验、令牌验证和退出。
+2. [IdentityService](../src/main/java/com/op1ed/appointmentmanager/identity/application/IdentityService.java) 与 [IdentityServiceImpl](../src/main/java/com/op1ed/appointmentmanager/identity/application/impl/IdentityServiceImpl.java)：先看业务接口，再看注册、密码校验、令牌验证和退出的实现。
 3. [SecurityConfiguration](../src/main/java/com/op1ed/appointmentmanager/identity/web/security/SecurityConfiguration.java) 与 [BearerTokenFilter](../src/main/java/com/op1ed/appointmentmanager/identity/web/security/BearerTokenFilter.java)：接口权限和请求身份。
-4. [AppointmentService](../src/main/java/com/op1ed/appointmentmanager/appointment/application/AppointmentService.java) 与 [AppointmentMapper](../src/main/java/com/op1ed/appointmentmanager/appointment/infrastructure/persistence/mapper/AppointmentMapper.java)：归属如何参与记录与总数查询。
+4. [AppointmentServiceImpl](../src/main/java/com/op1ed/appointmentmanager/appointment/application/impl/AppointmentServiceImpl.java) 与 [AppointmentMapper](../src/main/java/com/op1ed/appointmentmanager/appointment/infrastructure/persistence/mapper/AppointmentMapper.java)：归属如何参与记录与总数查询。
 5. [V4 迁移](../src/main/resources/db/migration/V4__add_accounts_tokens_and_appointment_owners.sql)：账号、令牌、外键和归属索引。
 6. [权限集成测试](../src/test/java/com/op1ed/appointmentmanager/identity/AuthAndOwnershipControllerTest.java)：同名隔离、伪造字段、401/403/404、过期和撤销、并发注册。
 

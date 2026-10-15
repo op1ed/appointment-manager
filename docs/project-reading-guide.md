@@ -2,7 +2,7 @@
 
 这份文档是整个项目的阅读起点。我们按当前代码分批学习，每批把相关文件的注释补齐，读完再进入下一批。
 
-**当前阅读进度：全局、医生和身份模块已基本读过，先补看 MyBatis-Plus 的数据库访问方式。** 从熟悉的医生查询和账号注册出发，阅读 [MyBatis-Plus 迁移说明](mybatis-plus-migration.md)，再进入时段与预约。身份模块不熟悉的请求认证部分可结合 [身份说明](identity-and-permissions.md) 回顾。
+**当前阅读进度：全局、医生和身份模块已基本读过，先补看 Service 接口与 Impl、MyBatis-Plus 数据访问。** 从熟悉的医生查询和账号注册出发，先读 [Service 接口与实现](service-and-implementation.md)，再读 [MyBatis-Plus 迁移说明](mybatis-plus-migration.md)，随后进入时段与预约。身份模块不熟悉的请求认证部分可结合 [身份说明](identity-and-permissions.md) 回顾。
 
 ## 1. 这个系统解决什么问题
 
@@ -41,9 +41,10 @@ Agent 在这套业务之上增加自然语言入口。例如用户说“帮我�
 | 子目录 | 阅读时把它理解成 | 主要工作 |
 | --- | --- | --- |
 | web | 请求入口 | 接收 HTTP、读取参数、调用应用服务、返回 JSON |
-| application | 用例执行者 | 完成一次业务操作，组织校验、事务和其他服务调用 |
+| application | 业务能力与输入输出 | Service 接口、Command、Query、Result |
+| application/impl | 用例执行者 | ServiceImpl 完成业务操作，组织校验、事务和其他服务调用 |
 | domain | 业务对象 | 表达医生、预约、时段及对象自身的规则 |
-| infrastructure/persistence/mapper | 数据库访问 | Service 直接调用 Mapper，执行 SQL 和申请数据库锁 |
+| infrastructure/persistence/mapper | 数据库访问 | ServiceImpl 调用 Mapper，执行 SQL 和申请数据库锁 |
 
 这是“模块化单体”：所有业务在一个 Java 应用里运行，使用同一个 MySQL。包目录表达职责和调用边界；当前没有把它们拆成多个独立服务。
 
@@ -55,8 +56,9 @@ Agent 在这套业务之上增加自然语言入口。例如用户说“帮我�
 flowchart LR
     CLIENT[用户或终端客户端] --> SECURITY[身份与访问规则]
     SECURITY --> CONTROLLER[Controller 接收请求]
-    CONTROLLER --> SERVICE[Service 完成业务]
-    SERVICE --> MAPPER[MyBatis-Plus Mapper]
+    CONTROLLER --> SERVICE[Service 接口]
+    SERVICE --> IMPL[ServiceImpl 完成业务]
+    IMPL --> MAPPER[MyBatis-Plus Mapper]
     MAPPER --> DB[(MySQL)]
 ```
 
@@ -64,8 +66,8 @@ flowchart LR
 
 1. `SecurityConfiguration` 配置允许公开查询医生。
 2. `DoctorController.getDoctor` 从路径中取得 7，调用 `DoctorService.requireById(7)`。
-3. Service 查询并检查医生是否存在，返回业务结果 DoctorInfo；不存在则抛业务异常。
-4. Service 直接调用 `DoctorMapper`，MyBatis-Plus 执行 SQL 访问 doctors 表，Doctor 映射查询结果。按主键查询与插入来自 `BaseMapper`，分页和行锁 SQL 在 Mapper 文件中。
+3. Spring 注入的实现执行 `DoctorServiceImpl.requireById`，检查医生是否存在，返回业务结果 DoctorInfo；不存在则抛业务异常。
+4. Impl 直接调用 `DoctorMapper`，MyBatis-Plus 执行 SQL 访问 doctors 表，Doctor 映射查询结果。按主键查询与插入来自 `BaseMapper`，分页和行锁 SQL 在 Mapper 文件中。
 5. Controller 把 DoctorInfo 转成 DoctorResponse，Spring 将响应转换为 JSON。
 
 这条链对应已读的第二批（医生模块），可以用来复习各层之间如何配合。
@@ -96,7 +98,7 @@ Agent 工具也会调用 Service。因此权限、占用检查和事务放在业
 | 2，已读 | 医生查询与创建 | 一个简单请求如何经过 Controller、Service、Mapper 和实体 |
 | 3A，已读 | 注册与登录 | 账号怎样保存、密码怎样校验、登录怎样发出令牌 |
 | 3B，已基本读过 | 令牌验证、退出和权限 | 后续请求怎样确定当前用户、哪些操作需要管理员 |
-| **3C，当前** | MyBatis-Plus 的数据访问 | Service 怎样调用 Mapper，新增、更新和数据库事务怎样执行 |
+| **3C，当前** | Service 接口、Impl 与 MyBatis-Plus | 接口怎样声明能力，Impl 怎样执行事务并调用 Mapper |
 | 4，下一批 | 发布时段与查询可用时段 | 医生和时段如何关联，如何检查时间重叠 |
 | 5 | 创建预约与并发占用 | 如何防止两个人同时约到同一时段，事务与锁各做什么 |
 | 6 | 取消、改期和操作记录 | 状态怎样变化，失败怎样回滚，重复操作如何处理 |

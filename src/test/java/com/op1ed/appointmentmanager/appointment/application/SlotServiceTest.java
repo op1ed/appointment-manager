@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.stream.Stream;
 
+import com.op1ed.appointmentmanager.appointment.application.impl.SlotServiceImpl;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentMapper;
 import com.op1ed.appointmentmanager.appointment.infrastructure.persistence.mapper.AppointmentSlotMapper;
@@ -53,7 +54,7 @@ class SlotServiceTest {
 
     @BeforeEach
     void setUp() {
-        slotService = new SlotService(doctorService, slotMapper, appointmentMapper);
+        slotService = new SlotServiceImpl(doctorService, slotMapper, appointmentMapper);
     }
 
     @ParameterizedTest

@@ -6,7 +6,7 @@
 
 目前采用 **模块化单体：按业务分包，模块内部轻量分层**。一个 Maven 工程构建一个应用，账号和登录属于 `identity` 模块，医生资料属于 `doctor` 模块，排班时段和预约属于 `appointment` 模块，工具调用和待确认动作属于 `agent` 模块。详细的职责、依赖关系和阅读顺序见 [架构说明](docs/architecture.md)。
 
-数据库访问采用 `Controller → Service → Mapper → MySQL`。Service 组织业务规则和事务，直接调用 MyBatis-Plus Mapper；用法从 [MyBatis-Plus 阅读说明](docs/mybatis-plus-migration.md) 开始。
+业务调用采用 `Controller → Service 接口 → ServiceImpl → Mapper → MySQL`。医生、身份、时段、预约的接口声明业务能力，Impl 组织规则和事务并直接调用 MyBatis-Plus Mapper；先读 [Service 接口与实现](docs/service-and-implementation.md)，再读 [MyBatis-Plus 阅读说明](docs/mybatis-plus-migration.md)。
 
 ## 已实现的业务
 

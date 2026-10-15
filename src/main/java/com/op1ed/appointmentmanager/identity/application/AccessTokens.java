@@ -10,7 +10,7 @@ import java.util.HexFormat;
 /**
  * 登录令牌工具：生成原始令牌、检查字符串格式、计算用于数据库查找的散列。
  *
- * <p>沿着 IdentityService.login 来读 generate 和 hash，再回到登录服务看令牌如何保存。
+ * <p>沿着 IdentityServiceImpl.login 来读 generate 和 hash，再回到登录实现看令牌如何保存。
  * 当前令牌是随机字符串；对应的用户和过期时间保存在数据库中，字符串自身没有这些业务字段。
  */
 public final class AccessTokens {

@@ -1,5 +1,6 @@
 package com.op1ed.appointmentmanager.doctor.application;
 
+import com.op1ed.appointmentmanager.doctor.application.impl.DoctorServiceImpl;
 import com.op1ed.appointmentmanager.doctor.infrastructure.persistence.mapper.DoctorMapper;
 import com.op1ed.appointmentmanager.identity.application.UserIdentity;
 import com.op1ed.appointmentmanager.shared.error.BusinessException;
@@ -16,7 +17,7 @@ class DoctorServiceTest {
     @Test
     void shouldRequireAdministratorBeforeWritingDoctor() {
         DoctorMapper mapper = mock(DoctorMapper.class);
-        DoctorService service = new DoctorService(mapper);
+        DoctorService service = new DoctorServiceImpl(mapper);
         UserIdentity user = new UserIdentity(31L, "alice", "Alice", false);
         assertThatThrownBy(() -> service.create(user, new CreateDoctorCommand("王医生")))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->

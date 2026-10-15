@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.op1ed.appointmentmanager.appointment.application.impl.AppointmentServiceImpl;
 import com.op1ed.appointmentmanager.appointment.domain.Appointment;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentSlot;
 import com.op1ed.appointmentmanager.appointment.domain.AppointmentStatus;
@@ -65,7 +66,7 @@ class AppointmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        appointmentService = new AppointmentService(
+        appointmentService = new AppointmentServiceImpl(
                 appointmentMapper, slotMapper, doctorService, eventMapper
         );
     }

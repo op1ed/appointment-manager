@@ -42,7 +42,7 @@ class ArchitectureTest {
         noClasses().that().resideInAPackage(BASE + ".appointment..")
                 .should().dependOnClassesThat().resideInAnyPackage(
                         BASE + ".doctor.domain..", BASE + ".doctor.infrastructure..",
-                        BASE + ".doctor.web.."
+                        BASE + ".doctor.web..", BASE + ".doctor.application.impl.."
                 ).check(productionClasses);
     }
 
@@ -92,7 +92,8 @@ class ArchitectureTest {
     void businessModulesMustOnlyUseIdentityApplicationEntryPoints() {
         noClasses().that().resideInAnyPackage(BASE + ".appointment..", BASE + ".doctor..")
                 .should().dependOnClassesThat().resideInAnyPackage(
-                        BASE + ".identity.domain..", BASE + ".identity.infrastructure..", BASE + ".identity.web.."
+                        BASE + ".identity.domain..", BASE + ".identity.infrastructure..", BASE + ".identity.web..",
+                        BASE + ".identity.application.impl.."
                 ).check(productionClasses);
     }
 
@@ -109,7 +110,9 @@ class ArchitectureTest {
                 .should().dependOnClassesThat().resideInAnyPackage(
                         BASE + ".appointment.domain..", BASE + ".appointment.infrastructure..", BASE + ".appointment.web..",
                         BASE + ".doctor.domain..", BASE + ".doctor.infrastructure..", BASE + ".doctor.web..",
-                        BASE + ".identity.domain..", BASE + ".identity.infrastructure..", BASE + ".identity.web.."
+                        BASE + ".identity.domain..", BASE + ".identity.infrastructure..", BASE + ".identity.web..",
+                        BASE + ".appointment.application.impl..", BASE + ".doctor.application.impl..",
+                        BASE + ".identity.application.impl.."
                 ).check(productionClasses);
     }
 
@@ -131,6 +134,13 @@ class ArchitectureTest {
     void projectMustUseMybatisInsteadOfJpaPersistence() {
         noClasses().that().resideInAPackage(BASE + "..")
                 .should().dependOnClassesThat().resideInAnyPackage("jakarta.persistence..", "org.hibernate..", "org.springframework.data.jpa..")
+                .check(productionClasses);
+    }
+
+    @Test
+    void callersMustDependOnServiceContractsInsteadOfImplementations() {
+        noClasses().that().resideOutsideOfPackage(BASE + "..application.impl..")
+                .should().dependOnClassesThat().resideInAPackage(BASE + "..application.impl..")
                 .check(productionClasses);
     }
 }

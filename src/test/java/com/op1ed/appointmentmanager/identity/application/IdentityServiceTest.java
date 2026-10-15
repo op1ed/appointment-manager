@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
+import com.op1ed.appointmentmanager.identity.application.impl.IdentityServiceImpl;
 import com.op1ed.appointmentmanager.identity.domain.AccessToken;
 import com.op1ed.appointmentmanager.identity.domain.AccountRole;
 import com.op1ed.appointmentmanager.identity.domain.UserAccount;
@@ -36,7 +37,7 @@ class IdentityServiceTest {
     void setUp() {
         accounts = mock(UserAccountMapper.class);
         tokens = mock(AccessTokenMapper.class);
-        service = new IdentityService(accounts, tokens, new BCryptPasswordEncoder(), Duration.ofHours(24));
+        service = new IdentityServiceImpl(accounts, tokens, new BCryptPasswordEncoder(), Duration.ofHours(24));
     }
 
     @ParameterizedTest
